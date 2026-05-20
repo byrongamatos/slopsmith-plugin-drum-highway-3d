@@ -610,6 +610,14 @@
         return true;
     };
     window.drumH3dGetSynthVolume = function () {
+        // When the synth has not initialised yet (viz never ran, settings
+        // opened first), read from localStorage so the settings slider shows
+        // the persisted value rather than the default 0.70.
+        if (!_synthPlayer) {
+            const raw = _readStore('drum_h3d_synth_vol');
+            const parsed = raw === null ? NaN : parseFloat(raw);
+            if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) return parsed;
+        }
         return _synthVolume;
     };
     window.drumH3dSetSynthVolume = function (v) {
@@ -646,18 +654,28 @@
             // Reuse an existing tag only if it succeeded (no data-error).
             // A previously-failed tag must be removed and retried so we don't
             // resolve immediately with a script that never actually executed.
+            // An in-flight tag (no data-loaded / data-error yet) gets
+            // additional listeners so we wait for its outcome rather than
+            // resolving immediately before it has actually run.
             const existing = document.querySelector(`script[src="${url}"]`);
             if (existing) {
                 if (existing.dataset.error) {
+                    // Previous load failed — remove and retry.
                     existing.remove();
-                } else {
+                } else if (existing.dataset.loaded) {
+                    // Already fully executed.
                     resolve();
+                    return;
+                } else {
+                    // Still in flight — piggyback on the same tag.
+                    existing.addEventListener('load', () => { existing.dataset.loaded = '1'; resolve(); }, { once: true });
+                    existing.addEventListener('error', () => { existing.dataset.error = '1'; reject(new Error('Failed to load ' + url)); }, { once: true });
                     return;
                 }
             }
             const s = document.createElement('script');
             s.src = url;
-            s.onload = resolve;
+            s.onload = () => { s.dataset.loaded = '1'; resolve(); };
             s.onerror = () => { s.dataset.error = '1'; reject(new Error('Failed to load ' + url)); };
             document.head.appendChild(s);
         });
@@ -1626,15 +1644,19 @@
                 const isHit = status === 'hit';
                 const tintDrum = isHit ? mDrumHitByLane[note.lane] : mDrumMissByLane[note.lane];
                 const tintCymbal = isHit ? mCymbalHitByLane[note.lane] : mCymbalMissByLane[note.lane];
-                if (tintDrum || tintCymbal) {
-                    mesh.traverse((child) => {
-                        if (!child.isMesh || !child.material) return;
-                        const isBase = child.material === mDrumByLane[note.lane];
-                        const isCym = child.material === mCymbalByLane[note.lane];
-                        if (isBase && tintDrum) child.material = tintDrum;
-                        else if (isCym && tintCymbal) child.material = tintCymbal;
-                    });
-                }
+                const ghostColor = isHit ? 0x00ff88 : 0xff4444;
+                mesh.traverse((child) => {
+                    if (!child.isMesh || !child.material) return;
+                    const isBase = child.material === mDrumByLane[note.lane];
+                    const isCym = child.material === mCymbalByLane[note.lane];
+                    // Ghost notes use a per-note transient MeshBasicMaterial
+                    // (the ring mesh). Tint it in-place — it's already unique
+                    // per note so no clone is needed.
+                    const isGhost = child.material.userData && child.material.userData.transient;
+                    if (isBase && tintDrum) child.material = tintDrum;
+                    else if (isCym && tintCymbal) child.material = tintCymbal;
+                    else if (isGhost) child.material.color.setHex(ghostColor);
+                });
             }
 
             notesGroup.add(mesh);
