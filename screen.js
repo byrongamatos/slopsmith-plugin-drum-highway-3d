@@ -294,6 +294,108 @@
     }
 
     /* ======================================================================
+     *  WebAudioFont drum-kit synth (module-scope, one AudioContext per tab)
+     *
+     *  Ported verbatim from slopsmith-plugin-drums so the 3D viz makes the
+     *  same kit sounds when the user strikes a pad. Preset URLs and the
+     *  JCLive soundfont match the 2D plugin so the kit feels identical.
+     *  Volume defaults to 0.7 and persists via `drum_h3d_synth_vol`.
+     * ====================================================================== */
+
+    const WAF_PLAYER_URL = 'https://surikov.github.io/webaudiofont/npm/dist/WebAudioFontPlayer.js';
+    const WAF_BASE = 'https://surikov.github.io/webaudiofontdata/sound/';
+    const WAF_SF = 'JCLive_sf2_file';
+    // GM percussion notes the JCLive soundfont actually maps. Matches the
+    // 2D plugin's DRUM_MIDI_NOTES; adding entries here would just download
+    // 404s if the soundfont doesn't ship them.
+    const DRUM_MIDI_NOTES = [35, 36, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 57, 59];
+    const LS_SYNTH_VOL = 'drum_h3d_synth_vol';
+
+    let _audioCtx = null;
+    let _synthPlayer = null;
+    let _synthGain = null;
+    let _synthVolume = 0.7;
+    let _playerScriptLoaded = false;
+    const _drumPresets = {};   // midiNote -> WebAudioFont preset
+
+    function _loadScript(url) {
+        return new Promise((resolve, reject) => {
+            if (document.querySelector(`script[src="${url}"]`)) { resolve(); return; }
+            const s = document.createElement('script');
+            s.src = url;
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('Failed to load ' + url));
+            document.head.appendChild(s);
+        });
+    }
+
+    function _wafVar(note) { return '_drum_' + note + '_0_' + WAF_SF; }
+    function _wafUrl(note) { return WAF_BASE + '128' + note + '_0_' + WAF_SF + '.js'; }
+
+    async function _synthInit() {
+        if (_synthPlayer) return;
+        try {
+            const raw = _readStore(LS_SYNTH_VOL);
+            const parsed = raw === null ? NaN : parseFloat(raw);
+            if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) _synthVolume = parsed;
+            if (!_playerScriptLoaded) {
+                await _loadScript(WAF_PLAYER_URL);
+                _playerScriptLoaded = true;
+            }
+            if (typeof WebAudioFontPlayer === 'undefined') return;
+            _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            _synthGain = _audioCtx.createGain();
+            _synthGain.gain.value = _synthVolume;
+            _synthGain.connect(_audioCtx.destination);
+            _synthPlayer = new WebAudioFontPlayer();
+            await _synthLoadKit();
+        } catch (e) {
+            console.warn('[Drum-Hwy3D] Synth init failed:', e);
+        }
+    }
+
+    async function _synthLoadKit() {
+        if (!_synthPlayer || !_audioCtx) return;
+        await Promise.all(DRUM_MIDI_NOTES.map(async (note) => {
+            const varName = _wafVar(note);
+            try {
+                if (!window[varName]) await _loadScript(_wafUrl(note));
+                const preset = window[varName];
+                if (preset) {
+                    _synthPlayer.adjustPreset(_audioCtx, preset);
+                    _drumPresets[note] = preset;
+                }
+            } catch (e) {
+                console.warn('[Drum-Hwy3D] preset load failed for MIDI ' + note + ':', e);
+            }
+        }));
+    }
+
+    function _synthEnsureCtx() {
+        // Most browsers block AudioContext until a user gesture. MIDI input
+        // counts as a gesture in Chrome — _synthDrumHit kicks the context
+        // out of suspended on first hit.
+        if (_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume();
+    }
+
+    function _synthDrumHit(midiNote, velocity) {
+        if (!_synthPlayer || !_audioCtx || !_synthGain) return;
+        const preset = _drumPresets[midiNote];
+        if (!preset) return;
+        _synthEnsureCtx();
+        const vol = ((velocity || 100) / 127) * _synthVolume;
+        // 0.5 s queue duration — drum samples are short, no sustain needed.
+        _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, 0, midiNote, 0.5, vol);
+    }
+
+    function _synthSetVolume(v) {
+        const c = Math.max(0, Math.min(1, Number(v) || 0));
+        _synthVolume = c;
+        if (_synthGain) _synthGain.gain.value = c;
+        _writeStore(LS_SYNTH_VOL, String(c));
+    }
+
+    /* ======================================================================
      *  Demo patterns — hardcoded, loop indefinitely
      * ====================================================================== */
 
@@ -612,7 +714,15 @@
         // index, scans the visible chart window for an un-hit matching
         // note within ±HIT_TOLERANCE_S, and updates scoring + visual
         // feedback. Wrong-piece or missed-window hits flash red.
-        function _handleDrumHit(midiNote, _velocity) {
+        function _handleDrumHit(midiNote, velocity) {
+            // Play the synthesised drum sample first — this is what makes
+            // the user's pad press feel like a kit even on a MIDI
+            // keyboard. _synthDrumHit no-ops if the soundfont isn't loaded
+            // yet (initial latency), so failing to hear early hits is
+            // self-healing once _synthLoadKit's promises resolve.
+            _synthDrumHit(midiNote, velocity);
+            _synthEnsureCtx();
+
             const piece = MIDI_TO_PIECE[midiNote];
             const lane = piece !== undefined ? PIECE_TO_LANE[piece] : undefined;
             // Always flash the lane (or a neutral wrong flash if the pad
@@ -1255,6 +1365,7 @@
                     _instances.add(instance);
                     _activeInstance = instance;
                     _midiInit();
+                    _synthInit();
                     _midiResume();
 
                     _injectHud();
