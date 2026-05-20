@@ -1225,7 +1225,9 @@
             scene.add(lights);
 
             // Floor plane — wide darkened quad under the lanes.
-            const floorW = LANE_COUNT * LANE_GAP + 8 * K;
+            // Use Math.max(1, LANE_COUNT) so a kick-only kit (LANE_COUNT=0)
+            // still produces a floor at least as wide as the kick bar (KICK_W).
+            const floorW = Math.max(1, LANE_COUNT) * LANE_GAP + 8 * K;
             const floorD = (AHEAD + BEHIND + 0.5) * TS + 60 * K;
             const gFloor = new T.PlaneGeometry(floorW, floorD);
             const mFloor = new T.MeshStandardMaterial({
