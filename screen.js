@@ -1304,11 +1304,20 @@
                 _updateMissed(t);
                 // Linear walk with early break — notes are sorted by time so
                 // the first note beyond AHEAD ends the visible window.
+                // Hit / missed notes get a tag passed through to placeNote
+                // so it can render them differently (hit → vanish, miss →
+                // dimmed). The match is keyed on (t, lane), same as hit
+                // detection — multiple piece-ids on a lane (crash_l +
+                // crash_r) share the visual feedback.
                 for (const note of _cachedRealNotes) {
                     const dt = note.t - t;
                     if (dt > AHEAD) break;
                     if (dt < -BEHIND) continue;
-                    placeNote(note, dt);
+                    const key = _hitKey(note.t, note.lane);
+                    const status = _hitKeys.has(key) ? 'hit' :
+                                   _missedKeys.has(key) ? 'missed' :
+                                   'pending';
+                    placeNote(note, dt, status);
                 }
                 return;
             }
@@ -1328,9 +1337,17 @@
             }
         }
 
-        function placeNote(note, dt) {
+        function placeNote(note, dt, status) {
             const laneCfg = LANES[note.lane];
             if (!laneCfg) return;
+
+            // Hit notes vanish immediately — classic rhythm-game cue: the
+            // moment you strike a note, it's "consumed" and gone. We can't
+            // dim the mesh by mutating mesh.material.opacity here because
+            // the material is shared with every other note in the lane;
+            // any mutation would drag the lane's whole visible note set
+            // (same lane-wide-flash bug we just fixed).
+            if (status === 'hit') return;
 
             const z = -dt * TS;            // dt > 0 → upstream (negative Z)
             const x = laneCfg.kind === 'kick' ? 0 : (LANE_X0 + note.lane * LANE_GAP);
@@ -1356,9 +1373,20 @@
             const approach = 1.0 + Math.max(0, 1 - Math.abs(dt) / 0.3) * 0.12;
             mesh.scale.multiplyScalar(approach);
 
+            // Missed notes: shrink to half scale so passed-without-strike
+            // notes still read as failed without going invisible. No
+            // material mutation — opacity would leak via the shared
+            // lane material onto every other visible note.
+            if (status === 'missed') {
+                mesh.scale.multiplyScalar(0.5);
+            }
+
             notesGroup.add(mesh);
 
             // Flam grace note — small auxiliary disc slightly before the main.
+            // Hit status applies to the whole flam (grace + main vanish
+            // together); missed status leaves the grace at normal size
+            // since shrinking just the main reads as enough miss-feedback.
             if (note.variant === 'flam' && laneCfg.kind === 'drum') {
                 const graceDt = dt + FLAM_GRACE_OFFSET;
                 if (graceDt >= -BEHIND && graceDt <= AHEAD) {
