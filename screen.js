@@ -561,6 +561,13 @@
     };
 
     /* ── MIDI device control API (consumed by settings.html) ───── */
+    window.drumH3dEnsureMidiInit = function () {
+        // Settings panel calls this on mount so the user can see + pick
+        // MIDI devices without having to load a song first. Fires the
+        // browser permission prompt the first time; idempotent after.
+        // Returns a promise that resolves when _midiInit settles.
+        return _midiInit();
+    };
     window.drumH3dListMidiInputs = function () {
         // Returns [{id, name}, ...] of all currently-known inputs, in
         // whatever order the browser enumerates them. Settings panel

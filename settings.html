@@ -367,12 +367,17 @@
             if (volLabel) volLabel.textContent = parseFloat(vol).toFixed(2);
         }
         window.addEventListener('drum_h3d:midi_devices', renderMidiPicker);
-        // Render once on settings panel mount + retry until the API is
-        // available (covers the case where the panel opens before
-        // screen.js evaluates).
+        // Kick off MIDI initialisation if the player viz never ran (user
+        // opened Settings → 3D Drum Highway directly). _midiInit is
+        // idempotent so this is safe even when the viz is also active.
+        // Re-render the picker when the access promise settles.
         (function pollMidi() {
-            if (window.drumH3dListMidiInputs) renderMidiPicker();
-            else setTimeout(pollMidi, 100);
+            if (window.drumH3dEnsureMidiInit) {
+                Promise.resolve(window.drumH3dEnsureMidiInit()).then(renderMidiPicker);
+                renderMidiPicker();  // first paint with whatever's cached
+            } else {
+                setTimeout(pollMidi, 100);
+            }
         })();
 
         // Hydrate controls from stored config on first paint.
