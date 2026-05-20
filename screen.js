@@ -755,38 +755,13 @@
         const FLASH_MS = 300;
 
         function _applyLaneFlashes() {
-            // Drop expired flashes.
+            // No longer used for visual feedback (chart notes now turn
+            // green/red on hit/miss via placeNote). Still drop expired
+            // entries from the buffer so the array doesn't grow forever
+            // if MIDI hits arrive while no chart is loaded.
             const now = performance.now();
             while (_laneFlashes.length && now - _laneFlashes[0].wall > FLASH_MS) {
                 _laneFlashes.shift();
-            }
-            if (!_laneFlashMaterials || !_laneFlashMaterials.length) return;
-            // Compute per-lane opacity from the still-live flashes. Brightest
-            // flash for each lane wins (we don't sum — would over-saturate).
-            const boost = new Array(LANES.length).fill(0);
-            const wrong = new Array(LANES.length).fill(false);
-            for (const f of _laneFlashes) {
-                if (f.lane < 0 || f.lane >= LANES.length) continue;
-                const age = (now - f.wall) / FLASH_MS;
-                const intensity = Math.max(0, 1 - age);
-                if (intensity > boost[f.lane]) {
-                    boost[f.lane] = intensity;
-                    wrong[f.lane] = (f.kind === 'wrong');
-                }
-            }
-            // Drive per-lane indicator opacity. Notes themselves keep their
-            // proximity-driven pulse (set by placeNote on the shared lane
-            // material) — flashing one lane no longer drags the others'
-            // visible notes brighter, addressing the "all toms light up"
-            // perception bug. Boost up to a fully-opaque 1.0 because the
-            // additive blending against the dark background still reads
-            // as a clear bright pop rather than blowing out.
-            for (let i = 0; i < LANES.length; i++) {
-                const mat = _laneFlashMaterials[i];
-                if (!mat) continue;
-                mat.opacity = boost[i];
-                mat.color.setHex(wrong[i] ? 0xff3030 :
-                                  LANES[i].kind === 'kick' ? 0xffa030 : 0xffffff);
             }
         }
 
@@ -992,37 +967,10 @@
             hitBar.position.set(0, 0.3 * K, 0);
             scene.add(hitBar);
 
-            // Per-lane flash boxes at the hit line. Standing vertical above
-            // the hit bar (so they aren't buried inside its 0.6*K-tall box)
-            // and one box per lane with its own material so only the struck
-            // lane shows feedback. Iterate over LANES (8 entries) — kick
-            // gets a wider box centered, others get a narrower box at
-            // their lane X.
-            _laneFlashMeshes = [];
-            _laneFlashMaterials = [];
-            for (let i = 0; i < LANES.length; i++) {
-                const cfg = LANES[i];
-                const isKick = cfg.kind === 'kick';
-                const w = isKick ? KICK_W * 0.95 : LANE_GAP * 0.85;
-                const h = 6 * K;        // tall enough to read from camera angle
-                const d = 1.4 * K;
-                const flashGeom = new T.BoxGeometry(w, h, d);
-                const flashMat = new T.MeshBasicMaterial({
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: 0,
-                    blending: T.AdditiveBlending,
-                    depthWrite: false,
-                });
-                const flashMesh = new T.Mesh(flashGeom, flashMat);
-                // Sit just in front of the hit bar (slightly +z toward
-                // camera) and centered vertically above it.
-                const x = isKick ? 0 : (LANE_X0 + i * LANE_GAP);
-                flashMesh.position.set(x, h / 2 + 0.6 * K, 1.0 * K);
-                scene.add(flashMesh);
-                _laneFlashMeshes.push(flashMesh);
-                _laneFlashMaterials.push(flashMat);
-            }
+            // (Lane-flash boxes removed — hit/miss feedback now lives on
+            // the chart note itself via a per-note material clone in
+            // placeNote. Simpler visual: green note = you struck it,
+            // red note = it scrolled past unstruck.)
 
             // Notes group is rebuilt every frame — pooling could come later
             // but at <100 visible notes per frame the GC cost is negligible.
@@ -1356,14 +1304,6 @@
             const laneCfg = LANES[note.lane];
             if (!laneCfg) return;
 
-            // Hit notes vanish immediately — classic rhythm-game cue: the
-            // moment you strike a note, it's "consumed" and gone. We can't
-            // dim the mesh by mutating mesh.material.opacity here because
-            // the material is shared with every other note in the lane;
-            // any mutation would drag the lane's whole visible note set
-            // (same lane-wide-flash bug we just fixed).
-            if (status === 'hit') return;
-
             const z = -dt * TS;            // dt > 0 → upstream (negative Z)
             const x = laneCfg.kind === 'kick' ? 0 : (LANE_X0 + note.lane * LANE_GAP);
             const y = laneCfg.kind === 'kick' ? 0 : DISC_H * 0.5;
@@ -1388,12 +1328,22 @@
             const approach = 1.0 + Math.max(0, 1 - Math.abs(dt) / 0.3) * 0.12;
             mesh.scale.multiplyScalar(approach);
 
-            // Missed notes: shrink to half scale so passed-without-strike
-            // notes still read as failed without going invisible. No
-            // material mutation — opacity would leak via the shared
-            // lane material onto every other visible note.
-            if (status === 'missed') {
-                mesh.scale.multiplyScalar(0.5);
+            // Status overrides — clone the shared lane material per-note so
+            // we can recolor JUST this note (green = hit, red = miss). The
+            // clone is flagged transient so disposeMeshTree cleans it up
+            // when the notesGroup gets rebuilt next frame. Without the
+            // clone we'd mutate the lane's shared material and drag every
+            // other visible note in the lane to the same colour.
+            if (status === 'hit' || status === 'missed') {
+                const tint = (status === 'hit') ? 0x22c55e : 0xef4444;
+                mesh.traverse((child) => {
+                    if (!child.isMesh || !child.material) return;
+                    const clone = child.material.clone();
+                    clone.userData.transient = true;
+                    if (clone.color) clone.color.setHex(tint);
+                    if (clone.emissive) clone.emissive.setHex(tint);
+                    child.material = clone;
+                });
             }
 
             notesGroup.add(mesh);
@@ -1458,15 +1408,6 @@
                     if (c.geometry) c.geometry.dispose();
                     if (c.material) c.material.dispose();
                 }
-            }
-            // Per-lane flash indicators — own geometry + material.
-            if (_laneFlashMeshes) {
-                for (const m of _laneFlashMeshes) {
-                    if (m.geometry) m.geometry.dispose();
-                    if (m.material) m.material.dispose();
-                }
-                _laneFlashMeshes = null;
-                _laneFlashMaterials = null;
             }
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
