@@ -655,6 +655,10 @@
         let laneGroup = null;       // lane stripes + dividers
         let kitMapGroup = null;     // top-of-highway kit silhouette
         let notesGroup = null;      // all currently-visible notes (recreated each frame)
+        // Per-lane hit-flash indicator discs at the hit line — own material
+        // per lane so flashing one lane doesn't drag the others.
+        let _laneFlashMeshes = null;
+        let _laneFlashMaterials = null;
 
         // Cached materials — palette-driven, rebuilt on palette swap.
         let mDrumByLane = null;     // Mesh material per lane (drum lanes)
@@ -752,28 +756,30 @@
             while (_laneFlashes.length && now - _laneFlashes[0].wall > FLASH_MS) {
                 _laneFlashes.shift();
             }
-            if (!mDrumByLane || !mCymbalByLane || !mKick) return;
-            // Compute per-lane brightness boost from the still-live flashes.
+            if (!_laneFlashMaterials || !_laneFlashMaterials.length) return;
+            // Compute per-lane opacity from the still-live flashes. Brightest
+            // flash for each lane wins (we don't sum — would over-saturate).
             const boost = new Array(LANES.length).fill(0);
-            const colorOverride = new Array(LANES.length).fill(null);
+            const wrong = new Array(LANES.length).fill(false);
             for (const f of _laneFlashes) {
                 if (f.lane < 0 || f.lane >= LANES.length) continue;
                 const age = (now - f.wall) / FLASH_MS;
                 const intensity = Math.max(0, 1 - age);
-                if (intensity > boost[f.lane]) boost[f.lane] = intensity;
-                // Wrong hits tint red. Hits keep the lane's own colour.
-                if (f.kind === 'wrong') colorOverride[f.lane] = 0xff3030;
+                if (intensity > boost[f.lane]) {
+                    boost[f.lane] = intensity;
+                    wrong[f.lane] = (f.kind === 'wrong');
+                }
             }
+            // Drive per-lane indicator opacity. Notes themselves keep their
+            // proximity-driven pulse (set by placeNote on the shared lane
+            // material) — flashing one lane no longer drags the others'
+            // visible notes brighter, addressing the "all toms light up"
+            // perception bug.
             for (let i = 0; i < LANES.length; i++) {
-                const cfg = LANES[i];
-                let mat = null;
-                if (cfg.kind === 'drum') mat = mDrumByLane[i];
-                else if (cfg.kind === 'cymbal') mat = mCymbalByLane[i];
-                else if (cfg.kind === 'kick') mat = mKick;
+                const mat = _laneFlashMaterials[i];
                 if (!mat) continue;
-                // Reset to baseline emissive each frame; placeNote bumps
-                // it for the active-note pulse. Lane flash adds on top.
-                mat.emissiveIntensity = (mat.emissiveIntensity || 0) + boost[i] * 1.2;
+                mat.opacity = boost[i] * 0.65;
+                mat.color.setHex(wrong[i] ? 0xff3030 : 0xffffff);
             }
         }
 
@@ -973,6 +979,35 @@
             const hitBar = new T.Mesh(gHit, mHit);
             hitBar.position.set(0, 0.3 * K, 0);
             scene.add(hitBar);
+
+            // Per-lane flash discs at the hit line. Each lane gets its own
+            // material so a flash only affects the struck lane (rather than
+            // brightening the lane's shared note material which would light
+            // up every visible note in that lane). Default opacity 0;
+            // _applyLaneFlashes bumps opacity briefly on hit.
+            _laneFlashMeshes = [];
+            _laneFlashMaterials = [];
+            for (let i = 0; i < LANE_COUNT; i++) {
+                const cfg = LANES[i];
+                const isKick = cfg.kind === 'kick';
+                const w = isKick ? KICK_W : LANE_GAP * 0.92;
+                const d = 1.6 * K;
+                const flashGeom = new T.PlaneGeometry(w, d);
+                const flashMat = new T.MeshBasicMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    opacity: 0,
+                    blending: T.AdditiveBlending,
+                    depthWrite: false,
+                });
+                const flashMesh = new T.Mesh(flashGeom, flashMat);
+                flashMesh.rotation.x = -Math.PI / 2;
+                const x = isKick ? 0 : (LANE_X0 + i * LANE_GAP);
+                flashMesh.position.set(x, 0.1 * K, 0);
+                scene.add(flashMesh);
+                _laneFlashMeshes.push(flashMesh);
+                _laneFlashMaterials.push(flashMat);
+            }
 
             // Notes group is rebuilt every frame — pooling could come later
             // but at <100 visible notes per frame the GC cost is negligible.
@@ -1380,6 +1415,15 @@
                     if (c.geometry) c.geometry.dispose();
                     if (c.material) c.material.dispose();
                 }
+            }
+            // Per-lane flash indicators — own geometry + material.
+            if (_laneFlashMeshes) {
+                for (const m of _laneFlashMeshes) {
+                    if (m.geometry) m.geometry.dispose();
+                    if (m.material) m.material.dispose();
+                }
+                _laneFlashMeshes = null;
+                _laneFlashMaterials = null;
             }
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
