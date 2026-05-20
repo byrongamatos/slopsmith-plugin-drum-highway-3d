@@ -560,6 +560,37 @@
         } catch (_) { return false; }
     };
 
+    /* ── MIDI device control API (consumed by settings.html) ───── */
+    window.drumH3dListMidiInputs = function () {
+        // Returns [{id, name}, ...] of all currently-known inputs, in
+        // whatever order the browser enumerates them. Settings panel
+        // re-renders on the 'drum_h3d:midi_devices' event.
+        return _midiListInputs();
+    };
+    window.drumH3dGetMidiInputId = function () {
+        return _midiCurrentInputId();
+    };
+    window.drumH3dSetMidiInput = function (id) {
+        // Empty string = explicit "None" opt-out. Persists by name +
+        // id via _midiConnect so a future page reload still finds the
+        // device after Chrome regenerates ids.
+        if (!_midiAccess) return false;
+        let name = '';
+        if (id) {
+            _midiAccess.inputs.forEach(inp => {
+                if (inp.id === id) name = inp.name || '';
+            });
+        }
+        _midiConnect(id || '', name);
+        return true;
+    };
+    window.drumH3dGetSynthVolume = function () {
+        return _synthVolume;
+    };
+    window.drumH3dSetSynthVolume = function (v) {
+        _synthSetVolume(v);
+    };
+
     /* ======================================================================
      *  WebAudioFont drum-kit synth (module-scope, one AudioContext per tab)
      *

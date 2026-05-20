@@ -42,6 +42,28 @@
         <p class="text-xs text-gray-500 mt-1">0 = down the lanes · 1 = top-down</p>
     </div>
 
+    <!-- MIDI input -->
+    <div class="mt-6 border-t border-gray-800 pt-4">
+        <h4 class="text-xs font-medium text-gray-300 mb-2">MIDI input</h4>
+        <label for="drumh3d-midi-input" class="text-xs font-medium text-gray-400 mb-1 block">Device</label>
+        <select id="drumh3d-midi-input"
+            onchange="window.drumH3dSetMidiInput && window.drumH3dSetMidiInput(this.value)"
+            class="w-full bg-dark-700 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-300 outline-none">
+            <option value="">— none —</option>
+        </select>
+        <p class="text-xs text-gray-500 mt-1">
+            Auto-picks the first non-passthrough input on load. Pick "none" to disable scoring.
+        </p>
+
+        <label for="drumh3d-synth-vol" class="text-xs font-medium text-gray-400 mb-1 mt-3 block">
+            Kit volume <span id="drumh3d-synth-vol-val" class="text-gray-500 font-mono">0.70</span>
+        </label>
+        <input type="range" id="drumh3d-synth-vol"
+            min="0" max="1" step="0.01" value="0.7"
+            oninput="window.drumH3dSetSynthVolume && window.drumH3dSetSynthVolume(this.value); document.getElementById('drumh3d-synth-vol-val').textContent = parseFloat(this.value).toFixed(2)"
+            class="w-full">
+    </div>
+
     <!-- Kit configuration -->
     <div class="mt-6 border-t border-gray-800 pt-4">
         <h4 class="text-xs font-medium text-gray-300 mb-2">My kit</h4>
@@ -321,6 +343,37 @@
         // Re-render the kit list whenever the kit changes (covers external
         // changes from setKit() / importKit() not initiated by this panel).
         window.addEventListener('drum_h3d:kit', () => renderKit());
+
+        // ─── MIDI device picker ───────────────────────────────
+        function renderMidiPicker() {
+            const sel = document.getElementById('drumh3d-midi-input');
+            if (!sel) return;
+            const inputs = window.drumH3dListMidiInputs ? window.drumH3dListMidiInputs() : [];
+            const current = window.drumH3dGetMidiInputId ? window.drumH3dGetMidiInputId() : '';
+            sel.innerHTML = '<option value="">— none —</option>';
+            for (const inp of inputs) {
+                const opt = document.createElement('option');
+                opt.value = inp.id;
+                opt.textContent = inp.name;
+                if (inp.id === current) opt.selected = true;
+                sel.appendChild(opt);
+            }
+            // Sync volume slider with the actual persisted value (default
+            // 0.7 if storage was empty or never written).
+            const vol = window.drumH3dGetSynthVolume ? window.drumH3dGetSynthVolume() : 0.7;
+            const volSlider = document.getElementById('drumh3d-synth-vol');
+            const volLabel = document.getElementById('drumh3d-synth-vol-val');
+            if (volSlider) volSlider.value = String(vol);
+            if (volLabel) volLabel.textContent = parseFloat(vol).toFixed(2);
+        }
+        window.addEventListener('drum_h3d:midi_devices', renderMidiPicker);
+        // Render once on settings panel mount + retry until the API is
+        // available (covers the case where the panel opens before
+        // screen.js evaluates).
+        (function pollMidi() {
+            if (window.drumH3dListMidiInputs) renderMidiPicker();
+            else setTimeout(pollMidi, 100);
+        })();
 
         // Hydrate controls from stored config on first paint.
         try {
