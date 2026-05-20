@@ -204,7 +204,15 @@
 
     let _midiInitInFlight = null;
     async function _midiInit() {
-        if (_midiAccess) return;
+        if (_midiAccess) {
+            // Access already granted in a prior init() cycle. Re-run
+            // _midiAutoConnect anyway so a localStorage change between
+            // inits (e.g. settings UI swap, or a manual write) takes
+            // effect on the next viz-pick. Without this, the plugin
+            // keeps the device from the FIRST init forever.
+            _midiAutoConnect();
+            return;
+        }
         if (_midiInitInFlight) return _midiInitInFlight;
         if (!navigator.requestMIDIAccess) return;
         _midiInitInFlight = (async () => {
