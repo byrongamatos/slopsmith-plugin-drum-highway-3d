@@ -150,6 +150,150 @@
     }
 
     /* ======================================================================
+     *  MIDI input + hit detection (module-scope singletons)
+     * ====================================================================== */
+
+    // Reverse of lib/drums.py PIECES default midis. The 2D drums plugin keeps
+    // a user-editable mapping in localStorage; the 3D viz starts with this
+    // baseline and the settings UI can override later. Multiple MIDI notes
+    // can map to the same piece-id (e.g. 35 & 36 both → kick).
+    const MIDI_TO_PIECE = {
+        35: 'kick',         36: 'kick',
+        37: 'snare_xstick',
+        38: 'snare',        40: 'snare',
+        41: 'tom_floor',
+        42: 'hh_closed',
+        43: 'tom_low',      58: 'tom_low',
+        44: 'hh_pedal',
+        45: 'tom_mid',      47: 'tom_mid',
+        46: 'hh_open',
+        48: 'tom_hi',       50: 'tom_hi',
+        49: 'crash_l',
+        51: 'ride',         59: 'ride',
+        52: 'china',
+        53: 'ride_bell',
+        55: 'splash',
+        57: 'crash_r',
+    };
+
+    // ±50 ms hit window — same as the 2D drums plugin so users get
+    // identical timing across both visualisations.
+    const HIT_TOLERANCE_S = 0.05;
+    const LS_MIDI_INPUT = 'drum_h3d_midi_input';
+
+    let _midiAccess = null;
+    let _midiInput = null;
+    // Gates `_midiInput.onmidimessage` wiring. init() flips true via
+    // _midiResume() and destroy() flips false via _midiPause(). Necessary
+    // because _midiInit is async — its requestMIDIAccess promise can
+    // resolve after the renderer was already destroyed, and without this
+    // gate `_midiAutoConnect` would wire onmidimessage into a dead instance.
+    let _midiActive = false;
+    // Routes incoming MIDI events to the focused renderer (null when no
+    // instance is active). Splitscreen support is deferred; for now this
+    // tracks the singleton instance.
+    let _activeInstance = null;
+    const _instances = new Set();
+
+    function _readStore(k) {
+        try { return localStorage.getItem(k); } catch (_) { return null; }
+    }
+    function _writeStore(k, v) {
+        try { localStorage.setItem(k, v); } catch (_) {}
+    }
+
+    let _midiInitInFlight = null;
+    async function _midiInit() {
+        if (_midiAccess) return;
+        if (_midiInitInFlight) return _midiInitInFlight;
+        if (!navigator.requestMIDIAccess) return;
+        _midiInitInFlight = (async () => {
+            try {
+                _midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+                _midiAccess.onstatechange = () => _midiNotifyDeviceListChanged();
+                _midiAutoConnect();
+                _midiNotifyDeviceListChanged();
+            } catch (e) {
+                console.warn('[Drum-Hwy3D] MIDI access denied:', e);
+            } finally {
+                _midiInitInFlight = null;
+            }
+        })();
+        return _midiInitInFlight;
+    }
+
+    function _midiAutoConnect() {
+        if (!_midiAccess) return;
+        const inputs = [];
+        _midiAccess.inputs.forEach(inp => inputs.push(inp));
+        if (!inputs.length) return;
+        // Empty string = explicit "None" opt-out from a prior settings
+        // change; null = never picked. Only respect the explicit-None,
+        // otherwise fall through to inputs[0].
+        const raw = _readStore(LS_MIDI_INPUT);
+        if (raw === '') return;
+        const target = inputs.find(i => i.id === raw) || inputs[0];
+        _midiConnect(target.id);
+    }
+
+    function _midiConnect(id) {
+        if (_midiInput) _midiInput.onmidimessage = null;
+        _midiInput = null;
+        _writeStore(LS_MIDI_INPUT, id || '');
+        if (!id || !_midiAccess) return;
+        _midiAccess.inputs.forEach(inp => {
+            if (inp.id === id) {
+                _midiInput = inp;
+                if (_midiActive) _midiInput.onmidimessage = _midiOnMessage;
+            }
+        });
+        _midiNotifyDeviceListChanged();
+    }
+
+    function _midiResume() {
+        _midiActive = true;
+        if (_midiInput) _midiInput.onmidimessage = _midiOnMessage;
+    }
+    function _midiPause() {
+        _midiActive = false;
+        if (_midiInput) _midiInput.onmidimessage = null;
+    }
+
+    function _midiOnMessage(e) {
+        if (!_activeInstance) return;
+        const data = e.data;
+        if (!data || data.length < 3) return;
+        const type = data[0] & 0xf0;
+        const note = data[1];
+        const vel = data[2];
+        // 0x90 = note-on. note-on with velocity 0 is a note-off (running
+        // status); skip those too.
+        if (type !== 0x90 || vel === 0) return;
+        _activeInstance._handleDrumHit(note, vel);
+    }
+
+    // Fired when the MIDI access state changes (device plugged/unplugged
+    // or a connect/disconnect from _midiConnect). Settings panels listen
+    // via the global event so they can re-render their device dropdown.
+    function _midiNotifyDeviceListChanged() {
+        try {
+            window.dispatchEvent(new CustomEvent('drum_h3d:midi_devices'));
+        } catch (_) {}
+    }
+
+    // List the currently-known input devices for the settings UI.
+    function _midiListInputs() {
+        const out = [];
+        if (_midiAccess) {
+            _midiAccess.inputs.forEach(inp => out.push({ id: inp.id, name: inp.name || inp.id }));
+        }
+        return out;
+    }
+    function _midiCurrentInputId() {
+        return _midiInput ? _midiInput.id : '';
+    }
+
+    /* ======================================================================
      *  Demo patterns — hardcoded, loop indefinitely
      * ====================================================================== */
 
@@ -356,6 +500,177 @@
 
         let _isReady = false;
         let _settingsHandler = null;
+
+        /* ── Hit detection + scoring (per-instance) ──────────────── */
+        // _hitKeys / _missedKeys: note keys (t|lane) of drum_tab hits the
+        // user already scored or scrolled past. Keying on LANE (not piece)
+        // lets a hit on either crash MIDI register against either crash
+        // note on the shared CR lane — same semantics as the 2D plugin.
+        const _hitKeys = new Set();
+        const _missedKeys = new Set();
+        let _hits = 0, _misses = 0;
+        let _streak = 0, _bestStreak = 0;
+        // [{lane, wall, kind}] — wall is performance.now(); kind drives
+        // the colour of the lane flash (green=hit, red=miss/wrong).
+        const _laneFlashes = [];
+        // Latest snapshot of (sorted real-data notes, currentTime) so
+        // MIDI events (which fire async w.r.t. draw) score against the
+        // chart the user is actually looking at.
+        let _latestNotes = null;
+        let _latestTime = 0;
+
+        /* ── HUD overlay (combo / accuracy / streak) ─────────────── */
+        let _hudEl = null;
+
+        function _injectHud() {
+            if (_hudEl || !highwayCanvas) return;
+            const parent = highwayCanvas.parentElement;
+            if (!parent) return;
+            // Position the parent relative so absolute HUD anchors to
+            // the canvas. Read-only check first so we don't clobber an
+            // existing position the host page set.
+            const cur = parent.style.position || getComputedStyle(parent).position;
+            if (cur === 'static' || !cur) parent.style.position = 'relative';
+            _hudEl = document.createElement('div');
+            _hudEl.className = 'drum-h3d-hud';
+            _hudEl.style.cssText = [
+                'position:absolute', 'top:10px', 'left:14px',
+                'font-family:system-ui,sans-serif', 'font-size:13px',
+                'color:#e2e8f0', 'pointer-events:none', 'z-index:6',
+                'text-shadow:0 1px 2px rgba(0,0,0,0.8)',
+                'min-width:140px', 'line-height:1.4',
+            ].join(';');
+            parent.appendChild(_hudEl);
+            _refreshHud();
+        }
+
+        function _removeHud() {
+            if (_hudEl && _hudEl.parentNode) _hudEl.parentNode.removeChild(_hudEl);
+            _hudEl = null;
+        }
+
+        function _refreshHud() {
+            if (!_hudEl) return;
+            const total = _hits + _misses;
+            const pct = total ? Math.round((_hits / total) * 100) : 0;
+            const comboColor = _streak >= 30 ? '#fde047' :
+                               _streak >= 10 ? '#86efac' : '#cbd5e1';
+            _hudEl.innerHTML =
+                `<div style="color:${comboColor};font-weight:600;font-size:18px">${_streak}× combo</div>` +
+                `<div>${_hits}/${total} (${pct}%)</div>` +
+                (_bestStreak ? `<div style="color:#94a3b8;font-size:11px">best ${_bestStreak}</div>` : '');
+        }
+
+        /* ── Lane flash — pulse a lane's emissive briefly on hit ── */
+        // Wallclock decay window — matches the 2D plugin's 300 ms flash.
+        const FLASH_MS = 300;
+
+        function _applyLaneFlashes() {
+            // Drop expired flashes.
+            const now = performance.now();
+            while (_laneFlashes.length && now - _laneFlashes[0].wall > FLASH_MS) {
+                _laneFlashes.shift();
+            }
+            if (!mDrumByLane || !mCymbalByLane || !mKick) return;
+            // Compute per-lane brightness boost from the still-live flashes.
+            const boost = new Array(LANES.length).fill(0);
+            const colorOverride = new Array(LANES.length).fill(null);
+            for (const f of _laneFlashes) {
+                if (f.lane < 0 || f.lane >= LANES.length) continue;
+                const age = (now - f.wall) / FLASH_MS;
+                const intensity = Math.max(0, 1 - age);
+                if (intensity > boost[f.lane]) boost[f.lane] = intensity;
+                // Wrong hits tint red. Hits keep the lane's own colour.
+                if (f.kind === 'wrong') colorOverride[f.lane] = 0xff3030;
+            }
+            for (let i = 0; i < LANES.length; i++) {
+                const cfg = LANES[i];
+                let mat = null;
+                if (cfg.kind === 'drum') mat = mDrumByLane[i];
+                else if (cfg.kind === 'cymbal') mat = mCymbalByLane[i];
+                else if (cfg.kind === 'kick') mat = mKick;
+                if (!mat) continue;
+                // Reset to baseline emissive each frame; placeNote bumps
+                // it for the active-note pulse. Lane flash adds on top.
+                mat.emissiveIntensity = (mat.emissiveIntensity || 0) + boost[i] * 1.2;
+            }
+        }
+
+        function _resetScoring() {
+            _hitKeys.clear();
+            _missedKeys.clear();
+            _hits = 0; _misses = 0;
+            _streak = 0; _bestStreak = 0;
+            _laneFlashes.length = 0;
+        }
+
+        function _hitKey(t, lane) {
+            return t.toFixed(3) + '|' + lane;
+        }
+
+        // MIDI note-on dispatcher. Resolves the played MIDI to a lane
+        // index, scans the visible chart window for an un-hit matching
+        // note within ±HIT_TOLERANCE_S, and updates scoring + visual
+        // feedback. Wrong-piece or missed-window hits flash red.
+        function _handleDrumHit(midiNote, _velocity) {
+            const piece = MIDI_TO_PIECE[midiNote];
+            const lane = piece !== undefined ? PIECE_TO_LANE[piece] : undefined;
+            // Always flash the lane (or a neutral wrong flash if the pad
+            // isn't mapped) so the user sees their input register.
+            if (lane === undefined) {
+                _laneFlashes.push({ lane: -1, wall: performance.now(), kind: 'wrong' });
+                return;
+            }
+
+            if (!_latestNotes || _latestNotes.length === 0) {
+                // No chart cached yet — count as a stray hit without
+                // inflating misses. Flash the lane so the user gets
+                // input feedback during a song-change reconnect window.
+                _laneFlashes.push({ lane, wall: performance.now(), kind: 'hit' });
+                return;
+            }
+
+            const t = _latestTime;
+            let foundHit = false;
+            for (const n of _latestNotes) {
+                if (n.t > t + HIT_TOLERANCE_S) break;
+                if (n.t < t - HIT_TOLERANCE_S) continue;
+                if (n.lane !== lane) continue;
+                const key = _hitKey(n.t, n.lane);
+                if (_hitKeys.has(key)) continue;
+                _hitKeys.add(key);
+                foundHit = true;
+                break;
+            }
+
+            if (foundHit) {
+                _hits++;
+                _streak++;
+                if (_streak > _bestStreak) _bestStreak = _streak;
+                _laneFlashes.push({ lane, wall: performance.now(), kind: 'hit' });
+            } else {
+                _misses++;
+                _streak = 0;
+                _laneFlashes.push({ lane, wall: performance.now(), kind: 'wrong' });
+            }
+        }
+
+        // Walk recently-passed notes once per frame and mark any unhit
+        // ones as missed. Called from rebuildNotes after the bundle's
+        // currentTime is known.
+        function _updateMissed(t) {
+            if (!_latestNotes) return;
+            const cutoff = t - HIT_TOLERANCE_S - 0.02;
+            for (const n of _latestNotes) {
+                if (n.t > cutoff) break;
+                if (n.t < cutoff - 2) continue;  // older than 2 s — already counted
+                const key = _hitKey(n.t, n.lane);
+                if (_hitKeys.has(key) || _missedKeys.has(key)) continue;
+                _missedKeys.add(key);
+                _misses++;
+                _streak = 0;
+            }
+        }
 
         function applySettings(detail) {
             if (!detail) return;
@@ -749,8 +1064,20 @@
                 if (_cachedDrumTabKey !== drumTab) {
                     _cachedDrumTabKey = drumTab;
                     _cachedRealNotes = _realNotesFromDrumTab(drumTab);
+                    // New chart — reset scoring so combo/accuracy don't
+                    // carry over from the previous song. Mirrors the v3
+                    // 2D plugin's bundle.isReady edge-detect behaviour.
+                    _resetScoring();
                 }
                 const t = (bundle && typeof bundle.currentTime === 'number') ? bundle.currentTime : 0;
+                // Snapshot for the MIDI handler — has to run BEFORE the
+                // visible-window walk so an in-flight pad hit fired
+                // between frames scores against the same view the user
+                // sees. _updateMissed also reads these to retire passed
+                // notes that the user didn't strike.
+                _latestNotes = _cachedRealNotes;
+                _latestTime = t;
+                _updateMissed(t);
                 // Linear walk with early break — notes are sorted by time so
                 // the first note beyond AHEAD ends the visible window.
                 for (const note of _cachedRealNotes) {
@@ -891,7 +1218,7 @@
 
         /* -- setRenderer contract --------------------------------------- */
 
-        return {
+        const instance = {
             contextType: 'webgl2',
 
             init(canvas, _bundle) {
@@ -919,6 +1246,19 @@
                     _settingsHandler = (ev) => applySettings(ev && ev.detail);
                     window.addEventListener('drum_h3d:settings', _settingsHandler);
 
+                    // MIDI lifecycle. _midiInit is idempotent across init
+                    // calls (re-running setRenderer for the same plugin
+                    // doesn't re-request browser permission); _midiResume
+                    // wires the message handler whenever this instance
+                    // claims focus, which for the non-splitscreen case is
+                    // immediately at init.
+                    _instances.add(instance);
+                    _activeInstance = instance;
+                    _midiInit();
+                    _midiResume();
+
+                    _injectHud();
+
                     _isReady = true;
                 });
             },
@@ -926,6 +1266,8 @@
             draw(bundle) {
                 if (!_isReady || !ren || !scene || !cam) return;
                 rebuildNotes(bundle);
+                _applyLaneFlashes();
+                _refreshHud();
                 ren.render(scene, cam);
             },
 
@@ -935,10 +1277,18 @@
             },
 
             destroy() {
+                _instances.delete(instance);
+                if (_activeInstance === instance) _activeInstance = null;
+                if (_instances.size === 0) _midiPause();
+                _removeHud();
                 teardown();
                 highwayCanvas = null;
             },
+            // Exposed for module-level MIDI router. The receiver runs on
+            // every note-on dispatched to _activeInstance.
+            _handleDrumHit,
         };
+        return instance;
     }
 
     /* ======================================================================
