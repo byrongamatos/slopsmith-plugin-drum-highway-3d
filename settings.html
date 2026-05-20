@@ -230,7 +230,11 @@
                             if (next.fallbacks[k] === removed) delete next.fallbacks[k];
                         }
                     } else { return; }
-                    window.drumH3dSetKit(next);  // event-driven renderKit() via drum_h3d:kit
+                    // Guard: drumH3dSetKit returns false when validation
+                    // rejects the kit (e.g. empty lanes[] after last removal).
+                    if (!window.drumH3dSetKit(next)) {
+                        setStatus('Kit must have at least one lane', 'err');
+                    }
                 };
             });
 
@@ -321,6 +325,12 @@
             copyToClipboard() {
                 const b64 = window.drumH3dExportKit && window.drumH3dExportKit();
                 if (!b64) return setStatus('export failed', 'err');
+                if (!navigator.clipboard) {
+                    // Clipboard API unavailable (non-secure context or blocked).
+                    setStatus('clipboard blocked — paste the string from the textarea', 'err');
+                    document.getElementById('drumh3d-kit-import-text').value = b64;
+                    return;
+                }
                 navigator.clipboard.writeText(b64).then(
                     () => setStatus('✓ kit copied', 'ok'),
                     () => setStatus('clipboard blocked — paste into the textarea', 'err'),
