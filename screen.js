@@ -316,7 +316,10 @@
     }
 
     function _midiOnMessage(e) {
-        if (!_activeInstance) return;
+        if (!_activeInstance) {
+            console.log('[Drum-Hwy3D] MIDI event but no active instance');
+            return;
+        }
         const data = e.data;
         if (!data || data.length < 3) return;
         const type = data[0] & 0xf0;
@@ -325,6 +328,7 @@
         // 0x90 = note-on. note-on with velocity 0 is a note-off (running
         // status); skip those too.
         if (type !== 0x90 || vel === 0) return;
+        console.log(`[Drum-Hwy3D] MIDI in: note=${note} vel=${vel} piece=${MIDI_TO_PIECE[note] || '(unmapped)'}`);
         _activeInstance._handleDrumHit(note, vel);
     }
 
@@ -800,32 +804,34 @@
         // note within ±HIT_TOLERANCE_S, and updates scoring + visual
         // feedback. Wrong-piece or missed-window hits flash red.
         function _handleDrumHit(midiNote, velocity) {
-            // Play the synthesised drum sample first — this is what makes
-            // the user's pad press feel like a kit even on a MIDI
-            // keyboard. _synthDrumHit no-ops if the soundfont isn't loaded
-            // yet (initial latency), so failing to hear early hits is
-            // self-healing once _synthLoadKit's promises resolve.
             _synthDrumHit(midiNote, velocity);
             _synthEnsureCtx();
 
             const piece = MIDI_TO_PIECE[midiNote];
             const lane = piece !== undefined ? PIECE_TO_LANE[piece] : undefined;
-            // Always flash the lane (or a neutral wrong flash if the pad
-            // isn't mapped) so the user sees their input register.
             if (lane === undefined) {
+                console.log(`  ↳ lane=undefined (piece=${piece}) — wrong-flash`);
                 _laneFlashes.push({ lane: -1, wall: performance.now(), kind: 'wrong' });
                 return;
             }
 
             if (!_latestNotes || _latestNotes.length === 0) {
-                // No chart cached yet — count as a stray hit without
-                // inflating misses. Flash the lane so the user gets
-                // input feedback during a song-change reconnect window.
+                console.log(`  ↳ lane=${lane} but no chart cached — stray-flash`);
                 _laneFlashes.push({ lane, wall: performance.now(), kind: 'hit' });
                 return;
             }
 
             const t = _latestTime;
+            // Diagnostic: find the closest visible note on the same lane
+            // so the user can see how far off the timing was.
+            let closest = null;
+            for (const n of _latestNotes) {
+                if (n.t > t + 0.5) break;
+                if (n.t < t - 0.5) continue;
+                if (n.lane !== lane) continue;
+                if (!closest || Math.abs(n.t - t) < Math.abs(closest.t - t)) closest = n;
+            }
+
             let foundHit = false;
             for (const n of _latestNotes) {
                 if (n.t > t + HIT_TOLERANCE_S) break;
@@ -838,15 +844,18 @@
                 break;
             }
 
+            const closestDelta = closest ? (closest.t - t) * 1000 : null;
             if (foundHit) {
                 _hits++;
                 _streak++;
                 if (_streak > _bestStreak) _bestStreak = _streak;
                 _laneFlashes.push({ lane, wall: performance.now(), kind: 'hit' });
+                console.log(`  ↳ HIT lane=${lane} t=${t.toFixed(3)} closest_dt=${closestDelta?.toFixed(0)}ms combo=${_streak}`);
             } else {
                 _misses++;
                 _streak = 0;
                 _laneFlashes.push({ lane, wall: performance.now(), kind: 'wrong' });
+                console.log(`  ↳ MISS lane=${lane} t=${t.toFixed(3)} closest_dt=${closestDelta === null ? '(none in 0.5s window)' : closestDelta.toFixed(0) + 'ms'} window=±${(HIT_TOLERANCE_S*1000)}ms`);
             }
         }
 
