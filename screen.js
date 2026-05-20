@@ -165,8 +165,8 @@
             { piece: 'kick' },
         ],
         // Chart piece-id → user's piece-id when the chart has a piece
-        // the user didn't map. Default behaviour collapses to the
-        // nearest sibling in the same category.
+        // the user didn't map. These explicit fallbacks cover the most
+        // common kit layouts; any unmapped piece is dropped at render time.
         fallbacks: {
             snare_xstick: 'snare',
             hh_open: 'hh_closed', hh_pedal: 'hh_closed',
@@ -1593,7 +1593,16 @@
                 return;
             }
 
-            // Demo-loop fallback (kept verbatim from the mockup).
+            // Demo-loop fallback: drumTab is absent or empty. If we just
+            // transitioned away from a real chart, clear stale scoring state
+            // so MIDI hits (and the HUD) don't score against the old notes.
+            if (_cachedDrumTabKey !== null) {
+                _cachedDrumTabKey = null;
+                _cachedRealNotes = [];
+                _latestNotes = [];
+                _latestTime = 0;
+                _resetScoring();
+            }
             const pat = DEMO_PATTERNS[settings.pattern];
             if (!pat) return;
             const now = performance.now() / 1000 - t0;
