@@ -179,7 +179,16 @@
     // ±50 ms hit window — same as the 2D drums plugin so users get
     // identical timing across both visualisations.
     const HIT_TOLERANCE_S = 0.05;
+    // Legacy id-only storage key. Read for migration; new writes go to
+    // LS_MIDI_PICK (id + name).
     const LS_MIDI_INPUT = 'drum_h3d_midi_input';
+    const LS_MIDI_PICK = 'drum_h3d_midi_pick_v2';
+
+    // Inputs whose name matches this regex are skipped from the auto-pick
+    // fallback. They're either passthrough loopbacks (Midi Through) or
+    // audio interfaces that happen to expose a MIDI port but don't have
+    // a controller behind them.
+    const _MIDI_BLOCKLIST_RE = /midi through|^thru\b|^iac\b/i;
 
     let _midiAccess = null;
     let _midiInput = null;
@@ -230,24 +239,63 @@
         return _midiInitInFlight;
     }
 
+    function _readSavedPick() {
+        // New v2 storage: {id, name} JSON. Falls back to legacy v1 id-only.
+        try {
+            const v2 = _readStore(LS_MIDI_PICK);
+            if (v2) {
+                const obj = JSON.parse(v2);
+                if (obj && typeof obj === 'object') return obj;
+            }
+        } catch (_) {}
+        const v1 = _readStore(LS_MIDI_INPUT);
+        if (typeof v1 === 'string') return { id: v1, name: '' };
+        return null;
+    }
+
+    function _writeSavedPick(id, name) {
+        try {
+            localStorage.setItem(LS_MIDI_PICK, JSON.stringify({ id: id || '', name: name || '' }));
+            // Keep the legacy key in sync so a downgrade is non-destructive.
+            localStorage.setItem(LS_MIDI_INPUT, id || '');
+        } catch (_) {}
+    }
+
     function _midiAutoConnect() {
         if (!_midiAccess) return;
         const inputs = [];
         _midiAccess.inputs.forEach(inp => inputs.push(inp));
         if (!inputs.length) return;
-        // Empty string = explicit "None" opt-out from a prior settings
-        // change; null = never picked. Only respect the explicit-None,
-        // otherwise fall through to inputs[0].
-        const raw = _readStore(LS_MIDI_INPUT);
-        if (raw === '') return;
-        const target = inputs.find(i => i.id === raw) || inputs[0];
-        _midiConnect(target.id);
+        const saved = _readSavedPick();
+        // Explicit None — user opted out, don't auto-connect.
+        if (saved && saved.id === '' && saved.name === '') return;
+        // Prefer exact id match (browser kept the id stable). Fall back
+        // to case-insensitive name match — Chrome+Linux regenerates the
+        // hashed id on every page load, so id-only matching strands the
+        // saved pick after the first reload.
+        let target = null;
+        if (saved && saved.id) {
+            target = inputs.find(i => i.id === saved.id) || null;
+        }
+        if (!target && saved && saved.name) {
+            const n = saved.name.toLowerCase();
+            target = inputs.find(i => (i.name || '').toLowerCase() === n) || null;
+        }
+        if (!target) {
+            // No saved pick (or saved pick disappeared) — pick the first
+            // input that isn't a loopback/passthrough. Falls back to
+            // inputs[0] only if every input is blocklisted.
+            target = inputs.find(i => !_MIDI_BLOCKLIST_RE.test(i.name || '')) || inputs[0];
+        }
+        _midiConnect(target.id, target.name);
     }
 
-    function _midiConnect(id) {
+    function _midiConnect(id, name) {
         if (_midiInput) _midiInput.onmidimessage = null;
         _midiInput = null;
-        _writeStore(LS_MIDI_INPUT, id || '');
+        // Pass through `name` so a future id-drift can still find this
+        // device. Empty id is the explicit-None opt-out.
+        _writeSavedPick(id || '', name || '');
         if (!id || !_midiAccess) return;
         _midiAccess.inputs.forEach(inp => {
             if (inp.id === id) {
