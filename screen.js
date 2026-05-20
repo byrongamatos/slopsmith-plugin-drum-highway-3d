@@ -78,27 +78,7 @@
     //   lane 5: crash    (cymbal)
     //   lane 6: ride     (cymbal)
     //   lane 7: kick     (full-width bar)
-    const LANE_COUNT = 7;
     const LANE_GAP = 12 * K;                       // X spacing between lane centers
-    const LANE_X0 = -((LANE_COUNT - 1) / 2) * LANE_GAP; // lane 0 center
-
-    // Each lane carries a kind and palette index. Palette index drives note
-    // color via S_COL[i] (currently selected palette).
-    //   kind: 'cymbal' | 'drum' | 'kick'
-    //   label: shown on the kit-silhouette backboard
-    //   subKind (drums): 'snare' applies a snare-wire stripe; others plain disc
-    //   subKind (cymbals): 'hihat' | 'crash' | 'ride'
-    const LANES = [
-        { kind: 'cymbal', subKind: 'hihat', label: 'HH',  paletteIdx: 7 }, // cyan
-        { kind: 'drum',   subKind: 'snare', label: 'SNR', paletteIdx: 0 }, // red
-        { kind: 'drum',   subKind: 'tom',   label: 'TM1', paletteIdx: 4 }, // green
-        { kind: 'drum',   subKind: 'tom',   label: 'TM2', paletteIdx: 2 }, // blue
-        { kind: 'drum',   subKind: 'tom',   label: 'FT',  paletteIdx: 5 }, // purple
-        { kind: 'cymbal', subKind: 'crash', label: 'CR',  paletteIdx: 1 }, // yellow
-        { kind: 'cymbal', subKind: 'ride',  label: 'RD',  paletteIdx: 3 }, // orange
-        // lane 7 — kick — uses paletteIdx 6 (pink) which we override with amber.
-        { kind: 'kick',   subKind: 'kick',  label: 'KICK', paletteIdx: 6 },
-    ];
     const KICK_COLOR = 0xffa030;                   // amber regardless of palette
 
     // Note dimensions (world units). All keyed to K so scale changes
@@ -107,7 +87,177 @@
     const DISC_H = 1.2 * K;                        // drum disc thickness
     const CYMBAL_R = 3.0 * K;                      // cymbal gem radius
     const CYMBAL_H = 1.6 * K;                      // cymbal gem height
-    const KICK_W = LANE_COUNT * LANE_GAP + 2 * K;  // kick bar width (spans lanes)
+
+    // ─── Piece vocabulary (mirrors lib/drums.py PIECES) ──────────────
+    // Used for kit configuration: user picks which of these pieces they
+    // own and in what lane order.
+    const ALL_PIECES = [
+        'kick',
+        'snare', 'snare_xstick',
+        'hh_closed', 'hh_open', 'hh_pedal',
+        'tom_hi', 'tom_mid', 'tom_low', 'tom_floor',
+        'crash_l', 'crash_r', 'splash', 'china',
+        'ride', 'ride_bell',
+    ];
+    const PIECE_LABELS = {
+        kick:         'KICK',
+        snare:        'SNR',
+        snare_xstick: 'XSTK',
+        hh_closed:    'HHc',
+        hh_open:      'HHo',
+        hh_pedal:     'HHp',
+        tom_hi:       'TM1',
+        tom_mid:      'TM2',
+        tom_low:      'TM3',
+        tom_floor:    'FT',
+        crash_l:      'CRl',
+        crash_r:      'CRr',
+        splash:       'SPL',
+        china:        'CHN',
+        ride:         'RD',
+        ride_bell:    'BLL',
+    };
+    const PIECE_CATEGORY = {
+        kick: 'kick',
+        snare: 'drum', snare_xstick: 'drum',
+        hh_closed: 'cymbal', hh_open: 'cymbal', hh_pedal: 'cymbal',
+        tom_hi: 'drum', tom_mid: 'drum', tom_low: 'drum', tom_floor: 'drum',
+        crash_l: 'cymbal', crash_r: 'cymbal', splash: 'cymbal', china: 'cymbal',
+        ride: 'cymbal', ride_bell: 'cymbal',
+    };
+    const PIECE_SUBKIND = {
+        kick: 'kick',
+        snare: 'snare', snare_xstick: 'snare',
+        hh_closed: 'hihat', hh_open: 'hihat', hh_pedal: 'hihat',
+        tom_hi: 'tom', tom_mid: 'tom', tom_low: 'tom', tom_floor: 'tom',
+        crash_l: 'crash', crash_r: 'crash', splash: 'crash', china: 'crash',
+        ride: 'ride', ride_bell: 'ride',
+    };
+    // Palette index per piece — chosen so the default 7-lane kit reads
+    // the same colours as the original hardcoded LANES layout.
+    const PIECE_PALETTE_IDX = {
+        kick: 6,
+        snare: 0, snare_xstick: 0,
+        hh_closed: 7, hh_open: 7, hh_pedal: 7,
+        tom_hi: 4, tom_mid: 2, tom_low: 5, tom_floor: 5,
+        crash_l: 1, crash_r: 1, splash: 1, china: 1,
+        ride: 3, ride_bell: 3,
+    };
+
+    // Default kit — replicates the prior hardcoded 7-piece + kick layout.
+    // Users without a saved kit see exactly what the mockup originally
+    // showed.
+    const DEFAULT_KIT = {
+        version: 1,
+        name: 'Default 7-piece',
+        // Lanes in order (left-to-right on the highway). The kick is a
+        // special full-width bar at the bottom — its position in this
+        // list is irrelevant (always rendered as the bar), but it must
+        // be present for the bar to show.
+        lanes: [
+            { piece: 'hh_closed' },
+            { piece: 'snare' },
+            { piece: 'tom_hi' },
+            { piece: 'tom_mid' },
+            { piece: 'tom_floor' },
+            { piece: 'crash_l' },
+            { piece: 'ride' },
+            { piece: 'kick' },
+        ],
+        // Chart piece-id → user's piece-id when the chart has a piece
+        // the user didn't map. Default behaviour collapses to the
+        // nearest sibling in the same category.
+        fallbacks: {
+            snare_xstick: 'snare',
+            hh_open: 'hh_closed', hh_pedal: 'hh_closed',
+            tom_low: 'tom_mid',
+            crash_r: 'crash_l', splash: 'crash_l', china: 'crash_l',
+            ride_bell: 'ride',
+        },
+    };
+
+    const LS_KIT_CONFIG = 'drum_h3d_kit_v1';
+
+    // Module-scope mutable lane layout derived from the active kit. Read
+    // by createFactory's scene-builders. _rebuildLanesFromKit recomputes
+    // when the kit changes; instances rebuild their scene by calling
+    // teardown() + initScene() on the same renderer.
+    let LANES = [];               // ordered hand-lane entries + (optionally) kick last
+    let LANE_COUNT = 0;            // count of HAND lanes (excludes the kick bar)
+    let LANE_X0 = 0;
+    let KICK_W = 0;
+
+    function _validateKit(raw) {
+        // Light validation — accept anything that has lanes[] with
+        // pieces in ALL_PIECES. Reject malformed input rather than
+        // letting a bad config crash initScene.
+        if (!raw || typeof raw !== 'object') return null;
+        const lanes = Array.isArray(raw.lanes) ? raw.lanes : null;
+        if (!lanes) return null;
+        const cleanLanes = [];
+        const seenPieces = new Set();
+        for (const ln of lanes) {
+            if (!ln || typeof ln.piece !== 'string') continue;
+            if (!ALL_PIECES.includes(ln.piece)) continue;
+            if (seenPieces.has(ln.piece)) continue;
+            seenPieces.add(ln.piece);
+            cleanLanes.push({ piece: ln.piece });
+        }
+        if (cleanLanes.length === 0) return null;
+        const fb = (raw.fallbacks && typeof raw.fallbacks === 'object') ? raw.fallbacks : {};
+        const cleanFb = {};
+        for (const [from, to] of Object.entries(fb)) {
+            if (!ALL_PIECES.includes(from) || !ALL_PIECES.includes(to)) continue;
+            if (!seenPieces.has(to)) continue;
+            cleanFb[from] = to;
+        }
+        return {
+            version: 1,
+            name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : 'Custom kit',
+            lanes: cleanLanes,
+            fallbacks: cleanFb,
+        };
+    }
+
+    function _readKitConfig() {
+        try {
+            const raw = localStorage.getItem(LS_KIT_CONFIG);
+            if (!raw) return null;
+            return _validateKit(JSON.parse(raw));
+        } catch (_) { return null; }
+    }
+
+    function _writeKitConfig(kit) {
+        try { localStorage.setItem(LS_KIT_CONFIG, JSON.stringify(kit)); } catch (_) {}
+    }
+
+    // The active kit object — replaceable at runtime via setKit().
+    let _activeKit = _readKitConfig() || DEFAULT_KIT;
+
+    function _rebuildLanesFromKit(kit) {
+        // Split: hand lanes first (in the user's chosen order), kick
+        // last (if present). This matches the original 8-entry LANES
+        // shape so all downstream geometry code keeps working.
+        const handLanes = [];
+        let kickLane = null;
+        for (const ln of kit.lanes) {
+            const piece = ln.piece;
+            const entry = {
+                kind:       PIECE_CATEGORY[piece] || 'drum',
+                subKind:    PIECE_SUBKIND[piece]  || 'tom',
+                label:      PIECE_LABELS[piece]   || piece.toUpperCase(),
+                paletteIdx: PIECE_PALETTE_IDX[piece] || 0,
+                piece,
+            };
+            if (entry.kind === 'kick') kickLane = entry;
+            else handLanes.push(entry);
+        }
+        LANES = kickLane ? handLanes.concat([kickLane]) : handLanes.slice();
+        LANE_COUNT = handLanes.length;
+        LANE_X0 = -((LANE_COUNT - 1) / 2) * LANE_GAP;
+        KICK_W = Math.max(1, LANE_COUNT) * LANE_GAP + 2 * K;
+    }
+    _rebuildLanesFromKit(_activeKit);
     const KICK_H = 1.4 * K;                        // kick bar thickness
     const KICK_D = 4.0 * K;                        // kick bar depth (along scroll)
 
@@ -121,20 +271,31 @@
     const AHEAD = 3.2;
     const BEHIND = 0.4;
 
-    // Map drum_tab piece-ids (see ~/Repositories/slopsmith/lib/drums.py PIECES)
-    // to the 8-lane layout above. The 2D drums plugin uses ~16 piece-ids; the
-    // 3D mockup intentionally collapses to a 7-lane hand kit + kick. Add new
-    // entries here if upstream lib/drums.py grows.
-    const PIECE_TO_LANE = {
-        hh_closed:    0, hh_open: 0, hh_pedal: 0,
-        snare:        1, snare_xstick: 1,
-        tom_hi:       2,
-        tom_mid:      3,
-        tom_low:      4, tom_floor: 4,
-        crash_l:      5, crash_r: 5, splash: 5, china: 5,
-        ride:         6, ride_bell: 6,
-        kick:         7,
-    };
+    // Map drum_tab piece-ids (lib/drums.py PIECES) → lane index in the
+    // active user kit's LANES. Rebuilt by _rebuildPieceToLaneMap whenever
+    // the kit changes. Pieces the user doesn't have route through
+    // _activeKit.fallbacks; pieces with no direct or fallback mapping get
+    // `undefined` and the hit is dropped at render time.
+    let PIECE_TO_LANE = {};
+    function _rebuildPieceToLaneMap(kit) {
+        PIECE_TO_LANE = {};
+        for (let i = 0; i < LANES.length; i++) {
+            const piece = LANES[i].piece;
+            if (piece) PIECE_TO_LANE[piece] = i;
+        }
+        // Apply user-defined fallbacks to cover chart pieces the user
+        // doesn't have on their kit (e.g. chart has tom_low + tom_floor,
+        // user has only one floor tom → fallback maps low onto floor).
+        const fb = (kit && kit.fallbacks) || {};
+        for (const piece of ALL_PIECES) {
+            if (PIECE_TO_LANE[piece] !== undefined) continue;
+            const target = fb[piece];
+            if (target && PIECE_TO_LANE[target] !== undefined) {
+                PIECE_TO_LANE[piece] = PIECE_TO_LANE[target];
+            }
+        }
+    }
+    _rebuildPieceToLaneMap(_activeKit);
 
     // Resolve a drum_tab hit's visual variant. Order matters: ghost wins over
     // accent (ghost notes are intentionally quiet so their flag dominates),
@@ -352,6 +513,52 @@
     function _midiCurrentInputId() {
         return _midiInput ? _midiInput.id : '';
     }
+
+    /* ── Kit configuration API for the settings panel ──────────────── */
+
+    window.drumH3dGetKit = function () {
+        // Returns a deep clone so the settings UI can mutate without
+        // disturbing the live config.
+        return JSON.parse(JSON.stringify(_activeKit));
+    };
+    window.drumH3dGetAllPieces = function () {
+        return ALL_PIECES.slice();
+    };
+    window.drumH3dGetPieceLabels = function () {
+        return Object.assign({}, PIECE_LABELS);
+    };
+    window.drumH3dGetPieceCategory = function () {
+        return Object.assign({}, PIECE_CATEGORY);
+    };
+    window.drumH3dSetKit = function (raw) {
+        const kit = _validateKit(raw);
+        if (!kit) return false;
+        _activeKit = kit;
+        _writeKitConfig(kit);
+        _rebuildLanesFromKit(kit);
+        _rebuildPieceToLaneMap(kit);
+        // Notify renderers + settings panels — each instance rebuilds its
+        // scene; settings panels re-render to reflect the new kit.
+        try {
+            window.dispatchEvent(new CustomEvent('drum_h3d:kit', { detail: { kit } }));
+        } catch (_) {}
+        return true;
+    };
+    window.drumH3dResetKit = function () {
+        window.drumH3dSetKit(DEFAULT_KIT);
+    };
+    // base64(JSON) round-trip for sharing kits between users.
+    window.drumH3dExportKit = function () {
+        const json = JSON.stringify(_activeKit);
+        return btoa(unescape(encodeURIComponent(json)));
+    };
+    window.drumH3dImportKit = function (b64) {
+        try {
+            const json = decodeURIComponent(escape(atob((b64 || '').trim())));
+            const obj = JSON.parse(json);
+            return window.drumH3dSetKit(obj);
+        } catch (_) { return false; }
+    };
 
     /* ======================================================================
      *  WebAudioFont drum-kit synth (module-scope, one AudioContext per tab)
@@ -689,6 +896,7 @@
 
         let _isReady = false;
         let _settingsHandler = null;
+        let _kitHandler = null;
 
         /* ── Hit detection + scoring (per-instance) ──────────────── */
         // _hitKeys / _missedKeys: note keys (t|lane) of drum_tab hits the
@@ -1080,10 +1288,12 @@
             board.position.set(0, boardH / 2 + 2 * K, farZ);
             kitMapGroup.add(board);
 
-            // Per-piece silhouettes — circle outlines (drums/cymbals) and a
-            // wide rectangle for the kick across the base.
-            for (let i = 0; i < LANES.length - 1; i++) {
+            // Per-piece silhouettes — circle outlines (drums/cymbals) for
+            // each HAND lane. LANE_COUNT excludes the kick (which is
+            // rendered as a wide rectangle below instead).
+            for (let i = 0; i < LANE_COUNT; i++) {
                 const lane = LANES[i];
+                if (!lane) continue;
                 const color = activePalette[lane.paletteIdx];
                 const x = LANE_X0 + i * LANE_GAP;
                 const r = lane.kind === 'cymbal' ? 3.2 * K : 2.6 * K;
@@ -1099,16 +1309,21 @@
                 ring.position.set(x, boardH * 0.55 + 2 * K, farZ + 0.1 * K);
                 kitMapGroup.add(ring);
             }
-            // Kick rectangle along the base of the backboard.
-            const kickG = new T.PlaneGeometry(boardW * 0.86, 2.0 * K);
-            const kickM = new T.MeshBasicMaterial({
-                color: KICK_COLOR,
-                transparent: true,
-                opacity: 0.85,
-            });
-            const kick = new T.Mesh(kickG, kickM);
-            kick.position.set(0, boardH * 0.18 + 2 * K, farZ + 0.1 * K);
-            kitMapGroup.add(kick);
+            // Kick rectangle — only rendered when the active kit includes
+            // a kick lane (LANES.length > LANE_COUNT means a kick is appended
+            // at the end). Otherwise no bar appears, kit silhouette omits it.
+            const hasKick = LANES.length > LANE_COUNT;
+            if (hasKick) {
+                const kickG = new T.PlaneGeometry(boardW * 0.86, 2.0 * K);
+                const kickM = new T.MeshBasicMaterial({
+                    color: KICK_COLOR,
+                    transparent: true,
+                    opacity: 0.85,
+                });
+                const kick = new T.Mesh(kickG, kickM);
+                kick.position.set(0, boardH * 0.18 + 2 * K, farZ + 0.1 * K);
+                kitMapGroup.add(kick);
+            }
         }
 
         /* -- per-frame note rendering ----------------------------------- */
@@ -1392,10 +1607,66 @@
 
         /* -- teardown --------------------------------------------------- */
 
+        // Drop scene geometry / materials / renderer without unsubscribing
+        // lifecycle handlers (settings, kit, MIDI). Used for kit-change
+        // rebuild where the renderer comes right back up against the same
+        // canvas.
+        function _disposeScene() {
+            if (notesGroup) {
+                while (notesGroup.children.length) {
+                    disposeMeshTree(notesGroup.children.pop());
+                }
+            }
+            if (kitMapGroup) {
+                while (kitMapGroup.children.length) {
+                    const c = kitMapGroup.children.pop();
+                    if (c.geometry) c.geometry.dispose();
+                    if (c.material) c.material.dispose();
+                }
+            }
+            disposeMaterialArray(mDrumByLane);
+            disposeMaterialArray(mCymbalByLane);
+            if (mKick) mKick.dispose();
+            if (mAccentRing) mAccentRing.dispose();
+            if (mGhostRing) mGhostRing.dispose();
+            if (mSnareStripe) mSnareStripe.dispose();
+            if (mBellDot) mBellDot.dispose();
+            if (gDrumDisc) gDrumDisc.dispose();
+            if (gCymbalGem) gCymbalGem.dispose();
+            if (gKickBar) gKickBar.dispose();
+            if (gAccentRing) gAccentRing.dispose();
+            if (gGhostRing) gGhostRing.dispose();
+            if (gSnareStripe) gSnareStripe.dispose();
+            if (gBellDot) gBellDot.dispose();
+            if (gFlamGrace) gFlamGrace.dispose();
+            if (ren) ren.dispose();
+            scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = null;
+            mDrumByLane = mCymbalByLane = mKick = null;
+            mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
+            gDrumDisc = gCymbalGem = gKickBar = null;
+            gAccentRing = gGhostRing = gSnareStripe = gBellDot = gFlamGrace = null;
+            // Re-create the renderer against the existing canvas. initScene
+            // populates everything we just disposed.
+            try {
+                ren = new T.WebGLRenderer({
+                    canvas: highwayCanvas,
+                    antialias: true,
+                    alpha: false,
+                });
+                ren.setClearColor(FOG_COLOR, 1);
+            } catch (e) {
+                console.error('[Drum-Hwy3D] WebGL2 re-init failed:', e);
+            }
+        }
+
         function teardown() {
             if (_settingsHandler) {
                 window.removeEventListener('drum_h3d:settings', _settingsHandler);
                 _settingsHandler = null;
+            }
+            if (_kitHandler) {
+                window.removeEventListener('drum_h3d:kit', _kitHandler);
+                _kitHandler = null;
             }
             if (notesGroup) {
                 while (notesGroup.children.length) {
@@ -1462,6 +1733,25 @@
 
                     _settingsHandler = (ev) => applySettings(ev && ev.detail);
                     window.addEventListener('drum_h3d:settings', _settingsHandler);
+
+                    // Kit-change: full scene rebuild because lane count,
+                    // positions, kit silhouette and all materials depend
+                    // on the active kit. Cheaper than dirty-tracking each
+                    // affected piece.
+                    _kitHandler = () => {
+                        if (!_isReady || !ren) return;
+                        _cachedDrumTabKey = null;  // force note re-resolution
+                        _cachedRealNotes = null;
+                        // Drop the scene + rebuild against the new LANES.
+                        // initScene reads the module-level LANES which was
+                        // recomputed by drumH3dSetKit before this event.
+                        const w = highwayCanvas ? highwayCanvas.clientWidth : 0;
+                        const h = highwayCanvas ? highwayCanvas.clientHeight : 0;
+                        _disposeScene();
+                        initScene();
+                        applySize(w, h);
+                    };
+                    window.addEventListener('drum_h3d:kit', _kitHandler);
 
                     // MIDI lifecycle. _midiInit is idempotent across init
                     // calls (re-running setRenderer for the same plugin
