@@ -231,7 +231,7 @@
                             if (next.fallbacks[k] === removed) delete next.fallbacks[k];
                         }
                     } else { return; }
-                    if (window.drumH3dSetKit(next)) renderKit();
+                    window.drumH3dSetKit(next);  // event-driven renderKit() via drum_h3d:kit
                 };
             });
 
@@ -285,7 +285,7 @@
                     next.fallbacks = next.fallbacks || {};
                     if (s.value) next.fallbacks[s.dataset.from] = s.value;
                     else delete next.fallbacks[s.dataset.from];
-                    if (window.drumH3dSetKit(next)) renderKit();
+                    window.drumH3dSetKit(next);  // event-driven renderKit() via drum_h3d:kit
                 };
             });
 
@@ -317,7 +317,7 @@
                 if (!piece) return;
                 const kit = window.drumH3dGetKit();
                 kit.lanes.push({ piece });
-                if (window.drumH3dSetKit(kit)) renderKit();
+                window.drumH3dSetKit(kit);  // event-driven renderKit() via drum_h3d:kit
             },
             copyToClipboard() {
                 const b64 = window.drumH3dExportKit && window.drumH3dExportKit();
@@ -331,12 +331,15 @@
                 const txt = document.getElementById('drumh3d-kit-import-text').value;
                 if (!txt.trim()) return setStatus('paste a kit string first', 'err');
                 const ok = window.drumH3dImportKit && window.drumH3dImportKit(txt);
-                if (ok) { renderKit(); setStatus('✓ kit imported', 'ok'); }
+                // drumH3dImportKit calls drumH3dSetKit which dispatches drum_h3d:kit;
+                // the event listener re-renders the panel, so no explicit renderKit().
+                if (ok) { setStatus('✓ kit imported', 'ok'); }
                 else setStatus('invalid kit string', 'err');
             },
             resetDefault() {
                 window.drumH3dResetKit && window.drumH3dResetKit();
-                renderKit();
+                // drumH3dResetKit calls drumH3dSetKit → dispatches drum_h3d:kit
+                // → event listener re-renders. No explicit renderKit() needed.
                 setStatus('✓ reset to default', 'ok');
             },
         };
