@@ -142,28 +142,36 @@
             }
         };
 
-        const PIECE_CATEGORY = (window.drumH3dGetPieceCategory && window.drumH3dGetPieceCategory()) || {};
-        const PIECE_LABELS = (window.drumH3dGetPieceLabels && window.drumH3dGetPieceLabels()) || {};
-        const ALL_PIECES = (window.drumH3dGetAllPieces && window.drumH3dGetAllPieces()) || [];
+        // Read fresh inside renderKit() — they're set by screen.js's IIFE,
+        // which may not have finished evaluating when this inline script
+        // first runs if the user opens Settings before the player ever loaded.
 
-        // Friendly name for the piece dropdowns.
-        function friendly(p) {
-            const label = PIECE_LABELS[p] || p;
-            const map = {
-                kick: 'Kick',
-                snare: 'Snare', snare_xstick: 'Snare (cross-stick)',
-                hh_closed: 'Hi-hat (closed)', hh_open: 'Hi-hat (open)', hh_pedal: 'Hi-hat (pedal)',
-                tom_hi: 'Tom — high', tom_mid: 'Tom — mid', tom_low: 'Tom — low', tom_floor: 'Floor tom',
-                crash_l: 'Crash (left)', crash_r: 'Crash (right)', splash: 'Splash', china: 'China',
-                ride: 'Ride', ride_bell: 'Ride bell',
-            };
-            return map[p] || label;
-        }
+        // Friendly piece labels — self-contained so renderKit's callbacks
+        // (which run after our local PIECE_LABELS scope has cleared)
+        // still work.
+        const FRIENDLY = {
+            kick: 'Kick',
+            snare: 'Snare', snare_xstick: 'Snare (cross-stick)',
+            hh_closed: 'Hi-hat (closed)', hh_open: 'Hi-hat (open)', hh_pedal: 'Hi-hat (pedal)',
+            tom_hi: 'Tom — high', tom_mid: 'Tom — mid', tom_low: 'Tom — low', tom_floor: 'Floor tom',
+            crash_l: 'Crash (left)', crash_r: 'Crash (right)', splash: 'Splash', china: 'China',
+            ride: 'Ride', ride_bell: 'Ride bell',
+        };
+        function friendly(p) { return FRIENDLY[p] || p; }
 
         // Render the current kit's lane list with reorder + remove buttons.
         function renderKit() {
             const kit = window.drumH3dGetKit ? window.drumH3dGetKit() : null;
-            if (!kit) return;
+            if (!kit) {
+                // screen.js hasn't published its API yet — defer one tick.
+                // Happens when the settings panel opens before the player
+                // has loaded a song.
+                setTimeout(renderKit, 100);
+                return;
+            }
+            const PIECE_CATEGORY = window.drumH3dGetPieceCategory ? window.drumH3dGetPieceCategory() : {};
+            const PIECE_LABELS = window.drumH3dGetPieceLabels ? window.drumH3dGetPieceLabels() : {};
+            const ALL_PIECES = window.drumH3dGetAllPieces ? window.drumH3dGetAllPieces() : [];
             document.getElementById('drumh3d-kit-name').value = kit.name || '';
 
             // Lanes panel — order matters: up/down buttons reorder, x
