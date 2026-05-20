@@ -308,9 +308,10 @@
         // attributes used by the markup above.
         window._drumH3dKit = {
             onNameInput(name) {
-                const kit = window.drumH3dGetKit();
-                kit.name = name;
-                window.drumH3dSetKit(kit);
+                // Use the name-only setter to avoid triggering 'drum_h3d:kit'
+                // on every keystroke — that event causes a full WebGL scene
+                // teardown/reinit which produces visible stutter while typing.
+                window.drumH3dSetKitName && window.drumH3dSetKitName(name);
             },
             onAddPiece(piece) {
                 if (!piece) return;

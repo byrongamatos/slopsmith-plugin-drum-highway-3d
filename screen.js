@@ -547,6 +547,16 @@
     window.drumH3dResetKit = function () {
         window.drumH3dSetKit(DEFAULT_KIT);
     };
+    // Name-only update — does NOT dispatch 'drum_h3d:kit' (which triggers a
+    // full WebGL scene teardown/reinit). Typing in the kit-name field therefore
+    // causes zero GPU overhead; the new name is persisted immediately so it
+    // survives export/clipboard share on the same keystroke.
+    window.drumH3dSetKitName = function (name) {
+        const trimmed = String(name || '').slice(0, 80);
+        if (!_activeKit) return;
+        _activeKit.name = trimmed;
+        _writeKitConfig(_activeKit);
+    };
     // base64(JSON) round-trip for sharing kits between users.
     window.drumH3dExportKit = function () {
         const json = JSON.stringify(_activeKit);
