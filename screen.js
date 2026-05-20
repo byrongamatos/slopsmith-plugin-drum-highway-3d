@@ -121,6 +121,34 @@
     const AHEAD = 3.2;
     const BEHIND = 0.4;
 
+    // Map drum_tab piece-ids (see ~/Repositories/slopsmith/lib/drums.py PIECES)
+    // to the 8-lane layout above. The 2D drums plugin uses ~16 piece-ids; the
+    // 3D mockup intentionally collapses to a 7-lane hand kit + kick. Add new
+    // entries here if upstream lib/drums.py grows.
+    const PIECE_TO_LANE = {
+        hh_closed:    0, hh_open: 0, hh_pedal: 0,
+        snare:        1, snare_xstick: 1,
+        tom_hi:       2,
+        tom_mid:      3,
+        tom_low:      4, tom_floor: 4,
+        crash_l:      5, crash_r: 5, splash: 5, china: 5,
+        ride:         6, ride_bell: 6,
+        kick:         7,
+    };
+
+    // Resolve a drum_tab hit's visual variant. Order matters: ghost wins over
+    // accent (ghost notes are intentionally quiet so their flag dominates),
+    // flam adds the leading grace disc, ride_bell adds the bright dot. A
+    // loud non-ghost hit (v >= 100) is an accent.
+    function _variantForHit(hit) {
+        if (hit.g) return 'ghost';
+        if (hit.f) return 'flam';
+        if (hit.p === 'ride_bell') return 'bell';
+        const v = typeof hit.v === 'number' ? hit.v : 100;
+        if (v >= 100) return 'accent';
+        return 'normal';
+    }
+
     /* ======================================================================
      *  Demo patterns — hardcoded, loop indefinitely
      * ====================================================================== */
@@ -685,23 +713,60 @@
             return group;
         }
 
-        function rebuildNotes() {
-            // Clear the existing notes group — for a mockup with <100 notes
-            // per frame the GC churn is fine and the code stays simple.
+        // Cache: converted drum_tab.hits → [{lane, t, variant}] sorted by t.
+        // Re-derive only when the bundle's drumTab object identity changes
+        // (one allocation per song-load, not per frame).
+        let _cachedDrumTabKey = null;
+        let _cachedRealNotes = null;
+
+        function _realNotesFromDrumTab(drumTab) {
+            const hits = (drumTab && Array.isArray(drumTab.hits)) ? drumTab.hits : [];
+            const out = [];
+            for (const h of hits) {
+                const lane = PIECE_TO_LANE[h.p];
+                if (lane === undefined) continue;  // unknown piece — skip silently
+                out.push({ lane, t: +h.t || 0, variant: _variantForHit(h) });
+            }
+            out.sort((a, b) => a.t - b.t);
+            return out;
+        }
+
+        function rebuildNotes(bundle) {
+            // Clear the existing notes group — for <100 simultaneously visible
+            // notes the GC churn is fine and the code stays simple.
             while (notesGroup.children.length) {
                 const c = notesGroup.children.pop();
                 disposeMeshTree(c);
             }
 
+            // Real-data path: when the active sloppak ships a drum_tab,
+            // bundle.drumTab is populated by static/highway.js (slopsmith
+            // drums-from-scratch PR). Otherwise fall back to the hardcoded
+            // demo loop so the viz still has something to show on songs
+            // without drums or in standalone playback.
+            const drumTab = bundle && bundle.drumTab;
+            if (drumTab && Array.isArray(drumTab.hits)) {
+                if (_cachedDrumTabKey !== drumTab) {
+                    _cachedDrumTabKey = drumTab;
+                    _cachedRealNotes = _realNotesFromDrumTab(drumTab);
+                }
+                const t = (bundle && typeof bundle.currentTime === 'number') ? bundle.currentTime : 0;
+                // Linear walk with early break — notes are sorted by time so
+                // the first note beyond AHEAD ends the visible window.
+                for (const note of _cachedRealNotes) {
+                    const dt = note.t - t;
+                    if (dt > AHEAD) break;
+                    if (dt < -BEHIND) continue;
+                    placeNote(note, dt);
+                }
+                return;
+            }
+
+            // Demo-loop fallback (kept verbatim from the mockup).
             const pat = DEMO_PATTERNS[settings.pattern];
             if (!pat) return;
             const now = performance.now() / 1000 - t0;
             const phase = now % pat.length;
-
-            // Render notes whose offset-from-now is within [-BEHIND, AHEAD].
-            // Walk the pattern at the current loop (phase) and also the
-            // previous/next loops since notes near the loop boundary need
-            // to be drawn from the adjacent cycle.
             for (let cycle = -1; cycle <= 1; cycle++) {
                 const cycleBase = cycle * pat.length;
                 for (const note of pat.notes) {
@@ -858,9 +923,9 @@
                 });
             },
 
-            draw(_bundle) {
+            draw(bundle) {
                 if (!_isReady || !ren || !scene || !cam) return;
-                rebuildNotes();
+                rebuildNotes(bundle);
                 ren.render(scene, cam);
             },
 
@@ -884,6 +949,14 @@
     // Static contextType so core can read it for canvas-swap decisions
     // before constructing a throwaway renderer instance.
     window.slopsmithViz_drum_highway_3d.contextType = 'webgl2';
-    // No matchesArrangement — this is a manual-pick mockup. Auto-mode
-    // should not select it for guitar/bass charts.
+    // Auto-select on sloppaks that carry a drum_tab.json (sloppak-spec
+    // §5.3). Sorts before `drums` alphabetically so Auto mode picks the
+    // 3D viz over the 2D fallback. The 2D drums plugin keeps its own
+    // matchesArrangement as a defence-in-depth fallback for WebGL2-less
+    // browsers — _autoMatchViz gates webgl2 contextType on _canRun3D
+    // before installing the renderer, so non-WebGL2 environments will
+    // skip past this and pick the 2D one.
+    window.slopsmithViz_drum_highway_3d.matchesArrangement = function (songInfo) {
+        return !!(songInfo && songInfo.has_drum_tab);
+    };
 })();
