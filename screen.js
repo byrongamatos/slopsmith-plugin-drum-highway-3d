@@ -353,6 +353,10 @@
 
     let _midiAccess = null;
     let _midiInput = null;
+    // Set to true by _midiConnect when a new device is selected. The render
+    // loop reads and clears this to skip retroactive miss-counting for notes
+    // that elapsed while no device was connected.
+    let _midiJustConnected = false;
     // Gates `_midiInput.onmidimessage` wiring. init() flips true via
     // _midiResume() and destroy() flips false via _midiPause(). Necessary
     // because _midiInit is async — its requestMIDIAccess promise can
@@ -465,6 +469,7 @@
         _midiAccess.inputs.forEach(inp => {
             if (inp.id === id) {
                 _midiInput = inp;
+                _midiJustConnected = true;
                 if (_midiActive) _midiInput.onmidimessage = _midiOnMessage;
             }
         });
@@ -638,11 +643,22 @@
 
     function _loadScript(url) {
         return new Promise((resolve, reject) => {
-            if (document.querySelector(`script[src="${url}"]`)) { resolve(); return; }
+            // Reuse an existing tag only if it succeeded (no data-error).
+            // A previously-failed tag must be removed and retried so we don't
+            // resolve immediately with a script that never actually executed.
+            const existing = document.querySelector(`script[src="${url}"]`);
+            if (existing) {
+                if (existing.dataset.error) {
+                    existing.remove();
+                } else {
+                    resolve();
+                    return;
+                }
+            }
             const s = document.createElement('script');
             s.src = url;
             s.onload = resolve;
-            s.onerror = () => reject(new Error('Failed to load ' + url));
+            s.onerror = () => { s.dataset.error = '1'; reject(new Error('Failed to load ' + url)); };
             document.head.appendChild(s);
         });
     }
@@ -1529,7 +1545,16 @@
                 // notes that the user didn't strike.
                 _latestNotes = _cachedRealNotes;
                 _latestTime = t;
-                _updateMissed(t);
+                // Only accumulate misses when a MIDI device is connected.
+                // With no device selected the user cannot hit notes, so
+                // counting passes as misses would corrupt the HUD accuracy.
+                // When a device was just connected, reset scoring first so
+                // notes that elapsed while no device was connected are not
+                // retroactively counted as misses.
+                if (_midiInput) {
+                    if (_midiJustConnected) { _midiJustConnected = false; _resetScoring(); }
+                    _updateMissed(t);
+                }
                 // Linear walk with early break — notes are sorted by time so
                 // the first note beyond AHEAD ends the visible window.
                 // Hit / missed notes get a tag passed through to placeNote
