@@ -402,11 +402,15 @@
 
     function _readSavedPick() {
         // New v2 storage: {id, name} JSON. Falls back to legacy v1 id-only.
+        // Coerce id/name to strings so _midiAutoConnect can safely call
+        // .toLowerCase() even if the stored JSON was manually edited.
         try {
             const v2 = _readStore(LS_MIDI_PICK);
             if (v2) {
                 const obj = JSON.parse(v2);
-                if (obj && typeof obj === 'object') return obj;
+                if (obj && typeof obj === 'object') {
+                    return { id: String(obj.id || ''), name: String(obj.name || '') };
+                }
             }
         } catch (_) {}
         const v1 = _readStore(LS_MIDI_INPUT);
@@ -477,10 +481,7 @@
     }
 
     function _midiOnMessage(e) {
-        if (!_activeInstance) {
-            console.log('[Drum-Hwy3D] MIDI event but no active instance');
-            return;
-        }
+        if (!_activeInstance) return;
         const data = e.data;
         if (!data || data.length < 3) return;
         const type = data[0] & 0xf0;
@@ -489,7 +490,6 @@
         // 0x90 = note-on. note-on with velocity 0 is a note-off (running
         // status); skip those too.
         if (type !== 0x90 || vel === 0) return;
-        console.log(`[Drum-Hwy3D] MIDI in: note=${note} vel=${vel} piece=${MIDI_TO_PIECE[note] || '(unmapped)'}`);
         _activeInstance._handleDrumHit(note, vel);
     }
 
@@ -558,14 +558,17 @@
         _writeKitConfig(_activeKit);
     };
     // base64(JSON) round-trip for sharing kits between users.
+    // Use TextEncoder/TextDecoder for UTF-8-safe base64 (escape/unescape are
+    // deprecated and can mis-handle non-ASCII characters in kit names).
     window.drumH3dExportKit = function () {
-        const json = JSON.stringify(_activeKit);
-        return btoa(unescape(encodeURIComponent(json)));
+        const bytes = new TextEncoder().encode(JSON.stringify(_activeKit));
+        return btoa(String.fromCharCode(...bytes));
     };
     window.drumH3dImportKit = function (b64) {
         try {
-            const json = decodeURIComponent(escape(atob((b64 || '').trim())));
-            const obj = JSON.parse(json);
+            const binStr = atob((b64 || '').trim());
+            const bytes = Uint8Array.from(binStr, c => c.charCodeAt(0));
+            const obj = JSON.parse(new TextDecoder().decode(bytes));
             return window.drumH3dSetKit(obj);
         } catch (_) { return false; }
     };
@@ -676,17 +679,6 @@
             window.addEventListener('pointerdown', _resumeOnGesture, { once: true, capture: true });
             window.addEventListener('keydown',     _resumeOnGesture, { once: true, capture: true });
             await _synthLoadKit();
-            // Expose minimal debug surface so we can verify state from
-            // DevTools without poking the IIFE closure. Safe to leave
-            // shipped — read-only references, no behaviour change.
-            window.__drumHwy3dDebug = {
-                audioCtxState: () => _audioCtx ? _audioCtx.state : 'no-ctx',
-                synthVolume: () => _synthVolume,
-                presetCount: () => Object.keys(_drumPresets).length,
-                resume: () => _audioCtx && _audioCtx.resume(),
-                playHit: (midi, vel) => _synthDrumHit(midi, vel || 100),
-                activeInstance: () => _activeInstance,
-            };
         } catch (e) {
             console.warn('[Drum-Hwy3D] Synth init failed:', e);
         }
@@ -914,14 +906,15 @@
         let laneGroup = null;       // lane stripes + dividers
         let kitMapGroup = null;     // top-of-highway kit silhouette
         let notesGroup = null;      // all currently-visible notes (recreated each frame)
-        // Per-lane hit-flash indicator discs at the hit line — own material
-        // per lane so flashing one lane doesn't drag the others.
-        let _laneFlashMeshes = null;
-        let _laneFlashMaterials = null;
 
         // Cached materials — palette-driven, rebuilt on palette swap.
         let mDrumByLane = null;     // Mesh material per lane (drum lanes)
         let mCymbalByLane = null;   // Mesh material per lane (cymbal lanes)
+        // Pre-cloned hit/miss tint materials — avoids per-frame per-note clones.
+        let mDrumHitByLane = null;
+        let mDrumMissByLane = null;
+        let mCymbalHitByLane = null;
+        let mCymbalMissByLane = null;
         let mKick = null;           // Kick bar material
         let mAccentRing = null;     // Halo material for accents
         let mGhostRing = null;      // Hollow ring material for ghost notes
@@ -1044,27 +1037,16 @@
             const piece = MIDI_TO_PIECE[midiNote];
             const lane = piece !== undefined ? PIECE_TO_LANE[piece] : undefined;
             if (lane === undefined) {
-                console.log(`  ↳ lane=undefined (piece=${piece}) — wrong-flash`);
                 _laneFlashes.push({ lane: -1, wall: performance.now(), kind: 'wrong' });
                 return;
             }
 
             if (!_latestNotes || _latestNotes.length === 0) {
-                console.log(`  ↳ lane=${lane} but no chart cached — stray-flash`);
                 _laneFlashes.push({ lane, wall: performance.now(), kind: 'hit' });
                 return;
             }
 
             const t = _latestTime;
-            // Diagnostic: find the closest visible note on the same lane
-            // so the user can see how far off the timing was.
-            let closest = null;
-            for (const n of _latestNotes) {
-                if (n.t > t + 0.5) break;
-                if (n.t < t - 0.5) continue;
-                if (n.lane !== lane) continue;
-                if (!closest || Math.abs(n.t - t) < Math.abs(closest.t - t)) closest = n;
-            }
 
             let foundHit = false;
             for (const n of _latestNotes) {
@@ -1078,18 +1060,15 @@
                 break;
             }
 
-            const closestDelta = closest ? (closest.t - t) * 1000 : null;
             if (foundHit) {
                 _hits++;
                 _streak++;
                 if (_streak > _bestStreak) _bestStreak = _streak;
                 _laneFlashes.push({ lane, wall: performance.now(), kind: 'hit' });
-                console.log(`  ↳ HIT lane=${lane} t=${t.toFixed(3)} closest_dt=${closestDelta?.toFixed(0)}ms combo=${_streak}`);
             } else {
                 _misses++;
                 _streak = 0;
                 _laneFlashes.push({ lane, wall: performance.now(), kind: 'wrong' });
-                console.log(`  ↳ MISS lane=${lane} t=${t.toFixed(3)} closest_dt=${closestDelta === null ? '(none in 0.5s window)' : closestDelta.toFixed(0) + 'ms'} window=±${(HIT_TOLERANCE_S*1000)}ms`);
             }
         }
 
@@ -1130,8 +1109,16 @@
         function rebuildPaletteMaterials() {
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
+            disposeMaterialArray(mDrumHitByLane);
+            disposeMaterialArray(mDrumMissByLane);
+            disposeMaterialArray(mCymbalHitByLane);
+            disposeMaterialArray(mCymbalMissByLane);
             mDrumByLane = new Array(LANES.length).fill(null);
             mCymbalByLane = new Array(LANES.length).fill(null);
+            mDrumHitByLane = new Array(LANES.length).fill(null);
+            mDrumMissByLane = new Array(LANES.length).fill(null);
+            mCymbalHitByLane = new Array(LANES.length).fill(null);
+            mCymbalMissByLane = new Array(LANES.length).fill(null);
             for (let i = 0; i < LANES.length; i++) {
                 const lane = LANES[i];
                 const color = lane.kind === 'kick' ? KICK_COLOR : activePalette[lane.paletteIdx];
@@ -1143,6 +1130,15 @@
                         roughness: 0.55,
                         metalness: 0.1,
                     });
+                    // Pre-cloned tint materials for hit (green) and miss (red),
+                    // keyed per lane so proximity emissive adjustments on the base
+                    // material don't affect tinted notes.
+                    mDrumHitByLane[i] = mDrumByLane[i].clone();
+                    mDrumHitByLane[i].color.setHex(0x22c55e);
+                    mDrumHitByLane[i].emissive.setHex(0x22c55e);
+                    mDrumMissByLane[i] = mDrumByLane[i].clone();
+                    mDrumMissByLane[i].color.setHex(0xef4444);
+                    mDrumMissByLane[i].emissive.setHex(0xef4444);
                 } else if (lane.kind === 'cymbal') {
                     mCymbalByLane[i] = new T.MeshStandardMaterial({
                         color,
@@ -1153,6 +1149,12 @@
                         transparent: true,
                         opacity: 0.92,
                     });
+                    mCymbalHitByLane[i] = mCymbalByLane[i].clone();
+                    mCymbalHitByLane[i].color.setHex(0x22c55e);
+                    mCymbalHitByLane[i].emissive.setHex(0x22c55e);
+                    mCymbalMissByLane[i] = mCymbalByLane[i].clone();
+                    mCymbalMissByLane[i].color.setHex(0xef4444);
+                    mCymbalMissByLane[i].emissive.setHex(0xef4444);
                 }
             }
             if (mKick) mKick.dispose();
@@ -1531,8 +1533,8 @@
                 // Linear walk with early break — notes are sorted by time so
                 // the first note beyond AHEAD ends the visible window.
                 // Hit / missed notes get a tag passed through to placeNote
-                // so it can render them differently (hit → vanish, miss →
-                // dimmed). The match is keyed on (t, lane), same as hit
+                // so it can render them differently (hit → green tint, miss →
+                // red tint). The match is keyed on (t, lane), same as hit
                 // detection — multiple piece-ids on a lane (crash_l +
                 // crash_r) share the visual feedback.
                 for (const note of _cachedRealNotes) {
@@ -1593,20 +1595,21 @@
 
             // Status overrides — clone the shared lane material per-note so
             // we can recolor JUST this note (green = hit, red = miss). The
-            // clone is flagged transient so disposeMeshTree cleans it up
-            // when the notesGroup gets rebuilt next frame. Without the
-            // clone we'd mutate the lane's shared material and drag every
-            // other visible note in the lane to the same colour.
+            // Swap in pre-cloned hit/miss tint materials — avoids per-frame
+            // per-note material.clone() calls while notesGroup is rebuilt.
             if (status === 'hit' || status === 'missed') {
-                const tint = (status === 'hit') ? 0x22c55e : 0xef4444;
-                mesh.traverse((child) => {
-                    if (!child.isMesh || !child.material) return;
-                    const clone = child.material.clone();
-                    clone.userData.transient = true;
-                    if (clone.color) clone.color.setHex(tint);
-                    if (clone.emissive) clone.emissive.setHex(tint);
-                    child.material = clone;
-                });
+                const isHit = status === 'hit';
+                const tintDrum = isHit ? mDrumHitByLane[note.lane] : mDrumMissByLane[note.lane];
+                const tintCymbal = isHit ? mCymbalHitByLane[note.lane] : mCymbalMissByLane[note.lane];
+                if (tintDrum || tintCymbal) {
+                    mesh.traverse((child) => {
+                        if (!child.isMesh || !child.material) return;
+                        const isBase = child.material === mDrumByLane[note.lane];
+                        const isCym = child.material === mCymbalByLane[note.lane];
+                        if (isBase && tintDrum) child.material = tintDrum;
+                        else if (isCym && tintCymbal) child.material = tintCymbal;
+                    });
+                }
             }
 
             notesGroup.add(mesh);
@@ -1672,8 +1675,21 @@
                     if (c.material) c.material.dispose();
                 }
             }
+            // Dispose laneGroup stripe meshes (PlaneGeometry + MeshBasicMaterial per
+            // lane) so kit-change rebuilds don't leak GPU resources.
+            if (laneGroup) {
+                while (laneGroup.children.length) {
+                    const c = laneGroup.children.pop();
+                    if (c.geometry) c.geometry.dispose();
+                    if (c.material) c.material.dispose();
+                }
+            }
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
+            disposeMaterialArray(mDrumHitByLane);
+            disposeMaterialArray(mDrumMissByLane);
+            disposeMaterialArray(mCymbalHitByLane);
+            disposeMaterialArray(mCymbalMissByLane);
             if (mKick) mKick.dispose();
             if (mAccentRing) mAccentRing.dispose();
             if (mGhostRing) mGhostRing.dispose();
@@ -1690,6 +1706,7 @@
             if (ren) ren.dispose();
             scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = null;
             mDrumByLane = mCymbalByLane = mKick = null;
+            mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
             gDrumDisc = gCymbalGem = gKickBar = null;
             gAccentRing = gGhostRing = gSnareStripe = gBellDot = gFlamGrace = null;
@@ -1730,6 +1747,10 @@
             }
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
+            disposeMaterialArray(mDrumHitByLane);
+            disposeMaterialArray(mDrumMissByLane);
+            disposeMaterialArray(mCymbalHitByLane);
+            disposeMaterialArray(mCymbalMissByLane);
             if (mKick) mKick.dispose();
             if (mAccentRing) mAccentRing.dispose();
             if (mGhostRing) mGhostRing.dispose();
@@ -1746,6 +1767,7 @@
             if (ren) ren.dispose();
             scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = null;
             mDrumByLane = mCymbalByLane = mKick = null;
+            mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
             gDrumDisc = gCymbalGem = gKickBar = null;
             gAccentRing = gGhostRing = gSnareStripe = gBellDot = gFlamGrace = null;

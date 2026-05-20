@@ -192,7 +192,6 @@
                 return;
             }
             const PIECE_CATEGORY = window.drumH3dGetPieceCategory ? window.drumH3dGetPieceCategory() : {};
-            const PIECE_LABELS = window.drumH3dGetPieceLabels ? window.drumH3dGetPieceLabels() : {};
             const ALL_PIECES = window.drumH3dGetAllPieces ? window.drumH3dGetAllPieces() : [];
             document.getElementById('drumh3d-kit-name').value = kit.name || '';
 
@@ -385,11 +384,12 @@
         })();
 
         // Hydrate controls from stored config on first paint.
+        // Narrow the try/catch to just localStorage reads — renderKit() and
+        // swatches must always run even when storage is blocked/disabled.
+        const pSel = document.getElementById('drumh3d-palette');
+        const cam = document.getElementById('drumh3d-camera');
+        const camVal = document.getElementById('drumh3d-camera-val');
         try {
-            const pSel = document.getElementById('drumh3d-palette');
-            const cam = document.getElementById('drumh3d-camera');
-            const camVal = document.getElementById('drumh3d-camera-val');
-
             const storedPal = localStorage.getItem('drum_h3d_palette');
             if (storedPal && PALETTES[storedPal]) pSel.value = storedPal;
 
@@ -399,12 +399,11 @@
                 cam.value = String(c);
                 camVal.textContent = c.toFixed(2);
             }
-
-            renderKit();
-            window._drumH3dRenderPaletteSwatches(pSel.value);
         } catch (e) {
             console.warn('[Drum-Hwy3D settings] hydration failed:', e);
         }
+        renderKit();
+        window._drumH3dRenderPaletteSwatches(pSel.value);
     })();
     </script>
 </div>
