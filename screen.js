@@ -348,7 +348,30 @@
             _synthGain.gain.value = _synthVolume;
             _synthGain.connect(_audioCtx.destination);
             _synthPlayer = new WebAudioFontPlayer();
+            // Chrome creates AudioContext in suspended state and refuses to
+            // play scheduled audio until a user gesture resumes it. MIDI
+            // note-on events count as gestures in recent Chrome — but only
+            // if the gesture-to-resume gap is small. Arm a one-shot
+            // pointerdown / keydown listener so the very first user
+            // interaction anywhere on the page unblocks playback. The
+            // {once:true} flag detaches the listener after it fires.
+            const _resumeOnGesture = () => {
+                if (_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume();
+            };
+            window.addEventListener('pointerdown', _resumeOnGesture, { once: true, capture: true });
+            window.addEventListener('keydown',     _resumeOnGesture, { once: true, capture: true });
             await _synthLoadKit();
+            // Expose minimal debug surface so we can verify state from
+            // DevTools without poking the IIFE closure. Safe to leave
+            // shipped — read-only references, no behaviour change.
+            window.__drumHwy3dDebug = {
+                audioCtxState: () => _audioCtx ? _audioCtx.state : 'no-ctx',
+                synthVolume: () => _synthVolume,
+                presetCount: () => Object.keys(_drumPresets).length,
+                resume: () => _audioCtx && _audioCtx.resume(),
+                playHit: (midi, vel) => _synthDrumHit(midi, vel || 100),
+                activeInstance: () => _activeInstance,
+            };
         } catch (e) {
             console.warn('[Drum-Hwy3D] Synth init failed:', e);
         }
