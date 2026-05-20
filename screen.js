@@ -778,12 +778,15 @@
             // proximity-driven pulse (set by placeNote on the shared lane
             // material) — flashing one lane no longer drags the others'
             // visible notes brighter, addressing the "all toms light up"
-            // perception bug.
+            // perception bug. Boost up to a fully-opaque 1.0 because the
+            // additive blending against the dark background still reads
+            // as a clear bright pop rather than blowing out.
             for (let i = 0; i < LANES.length; i++) {
                 const mat = _laneFlashMaterials[i];
                 if (!mat) continue;
-                mat.opacity = boost[i] * 0.65;
-                mat.color.setHex(wrong[i] ? 0xff3030 : 0xffffff);
+                mat.opacity = boost[i];
+                mat.color.setHex(wrong[i] ? 0xff3030 :
+                                  LANES[i].kind === 'kick' ? 0xffa030 : 0xffffff);
             }
         }
 
@@ -989,19 +992,21 @@
             hitBar.position.set(0, 0.3 * K, 0);
             scene.add(hitBar);
 
-            // Per-lane flash discs at the hit line. Each lane gets its own
-            // material so a flash only affects the struck lane (rather than
-            // brightening the lane's shared note material which would light
-            // up every visible note in that lane). Default opacity 0;
-            // _applyLaneFlashes bumps opacity briefly on hit.
+            // Per-lane flash boxes at the hit line. Standing vertical above
+            // the hit bar (so they aren't buried inside its 0.6*K-tall box)
+            // and one box per lane with its own material so only the struck
+            // lane shows feedback. Iterate over LANES (8 entries) — kick
+            // gets a wider box centered, others get a narrower box at
+            // their lane X.
             _laneFlashMeshes = [];
             _laneFlashMaterials = [];
-            for (let i = 0; i < LANE_COUNT; i++) {
+            for (let i = 0; i < LANES.length; i++) {
                 const cfg = LANES[i];
                 const isKick = cfg.kind === 'kick';
-                const w = isKick ? KICK_W : LANE_GAP * 0.92;
-                const d = 1.6 * K;
-                const flashGeom = new T.PlaneGeometry(w, d);
+                const w = isKick ? KICK_W * 0.95 : LANE_GAP * 0.85;
+                const h = 6 * K;        // tall enough to read from camera angle
+                const d = 1.4 * K;
+                const flashGeom = new T.BoxGeometry(w, h, d);
                 const flashMat = new T.MeshBasicMaterial({
                     color: 0xffffff,
                     transparent: true,
@@ -1010,9 +1015,10 @@
                     depthWrite: false,
                 });
                 const flashMesh = new T.Mesh(flashGeom, flashMat);
-                flashMesh.rotation.x = -Math.PI / 2;
+                // Sit just in front of the hit bar (slightly +z toward
+                // camera) and centered vertically above it.
                 const x = isKick ? 0 : (LANE_X0 + i * LANE_GAP);
-                flashMesh.position.set(x, 0.1 * K, 0);
+                flashMesh.position.set(x, h / 2 + 0.6 * K, 1.0 * K);
                 scene.add(flashMesh);
                 _laneFlashMeshes.push(flashMesh);
                 _laneFlashMaterials.push(flashMat);
