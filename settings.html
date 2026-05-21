@@ -143,9 +143,10 @@
             const kit = (window.drumH3dGetKit && window.drumH3dGetKit()) || null;
             const lanes = (kit && kit.lanes) || [];
             // The kick always shows amber — same as the renderer. Other
-            // lanes follow the piece's palette index from screen.js's
-            // PIECE_PALETTE_IDX mirror.
-            const PALETTE_IDX = {
+            // lanes follow the piece's palette index from screen.js,
+            // retrieved via drumH3dGetPiecePaletteIdx() so settings.html
+            // stays in sync when pieces are added without any copy-paste.
+            const PALETTE_IDX = (window.drumH3dGetPiecePaletteIdx && window.drumH3dGetPiecePaletteIdx()) || {
                 kick: -1,  // sentinel — render amber
                 snare: 0, snare_xstick: 0,
                 hh_closed: 7, hh_open: 7, hh_pedal: 7,

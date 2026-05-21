@@ -502,6 +502,15 @@
     // or a connect/disconnect from _midiConnect). Settings panels listen
     // via the global event so they can re-render their device dropdown.
     function _midiNotifyDeviceListChanged() {
+        // If the currently-selected input was disconnected, clear the reference
+        // so _updateMissed() stops counting and the UI shows "no device".
+        if (_midiInput && _midiAccess) {
+            const stillPresent = _midiAccess.inputs.has(_midiInput.id);
+            if (!stillPresent) {
+                _midiInput.onmidimessage = null;
+                _midiInput = null;
+            }
+        }
         try {
             window.dispatchEvent(new CustomEvent('drum_h3d:midi_devices'));
         } catch (_) {}
@@ -534,6 +543,14 @@
     };
     window.drumH3dGetPieceCategory = function () {
         return Object.assign({}, PIECE_CATEGORY);
+    };
+    // Exposed so settings.html palette swatches stay in sync with the
+    // renderer without duplicating the mapping.  kick maps to -1 here
+    // (settings.html convention = render amber, matching the renderer's
+    // special-case amber for kick bars).
+    window.drumH3dGetPiecePaletteIdx = function () {
+        return Object.assign({}, PIECE_PALETTE_IDX, { kick: -1 });
+    };
     };
     window.drumH3dSetKit = function (raw) {
         const kit = _validateKit(raw);
@@ -1005,6 +1022,7 @@
 
         /* ── HUD overlay (combo / accuracy / streak) ─────────────── */
         let _hudEl = null;
+        let _hudParentOrigPosition = null;   // saved so _removeHud can restore it
 
         function _injectHud() {
             if (_hudEl || !highwayCanvas) return;
@@ -1014,7 +1032,10 @@
             // the canvas. Read-only check first so we don't clobber an
             // existing position the host page set.
             const cur = parent.style.position || getComputedStyle(parent).position;
-            if (cur === 'static' || !cur) parent.style.position = 'relative';
+            if (cur === 'static' || !cur) {
+                _hudParentOrigPosition = parent.style.position;
+                parent.style.position = 'relative';
+            }
             _hudEl = document.createElement('div');
             _hudEl.className = 'drum-h3d-hud';
             _hudEl.style.cssText = [
@@ -1029,7 +1050,17 @@
         }
 
         function _removeHud() {
-            if (_hudEl && _hudEl.parentNode) _hudEl.parentNode.removeChild(_hudEl);
+            if (_hudEl) {
+                const parent = _hudEl.parentNode;
+                if (parent) {
+                    parent.removeChild(_hudEl);
+                    // Restore position only if _injectHud changed it.
+                    if (_hudParentOrigPosition !== null) {
+                        parent.style.position = _hudParentOrigPosition;
+                        _hudParentOrigPosition = null;
+                    }
+                }
+            }
             _hudEl = null;
         }
 
