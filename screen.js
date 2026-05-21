@@ -465,14 +465,19 @@
         // Pass through `name` so a future id-drift can still find this
         // device. Empty id is the explicit-None opt-out.
         _writeSavedPick(id || '', name || '');
-        if (!id || !_midiAccess) return;
-        _midiAccess.inputs.forEach(inp => {
-            if (inp.id === id) {
-                _midiInput = inp;
-                _midiJustConnected = true;
-                if (_midiActive) _midiInput.onmidimessage = _midiOnMessage;
-            }
-        });
+        if (id && _midiAccess) {
+            _midiAccess.inputs.forEach(inp => {
+                if (inp.id === id) {
+                    _midiInput = inp;
+                    _midiJustConnected = true;
+                    if (_midiActive) _midiInput.onmidimessage = _midiOnMessage;
+                }
+            });
+        }
+        // Notify on BOTH connect and disconnect/opt-out so any open
+        // settings panel re-renders its device dropdown consistently.
+        // The explicit-"none" path used to early-return before reaching
+        // here, leaving other open UIs showing a stale selection.
         _midiNotifyDeviceListChanged();
     }
 
@@ -1784,7 +1789,9 @@
         // Drop scene geometry / materials / renderer without unsubscribing
         // lifecycle handlers (settings, kit, MIDI). Used for kit-change
         // rebuild where the renderer comes right back up against the same
-        // canvas.
+        // canvas. Returns true when the renderer was re-created cleanly,
+        // false when WebGL re-init failed — callers must NOT proceed to
+        // initScene() on false (the scene would draw into nothing).
         function _disposeScene() {
             if (notesGroup) {
                 while (notesGroup.children.length) {
@@ -1844,8 +1851,11 @@
                     alpha: false,
                 });
                 ren.setClearColor(FOG_COLOR, 1);
+                return true;
             } catch (e) {
                 console.error('[Drum-Hwy3D] WebGL2 re-init failed:', e);
+                ren = null;
+                return false;
             }
         }
 
@@ -1944,7 +1954,15 @@
                         // recomputed by drumH3dSetKit before this event.
                         const w = highwayCanvas ? highwayCanvas.clientWidth : 0;
                         const h = highwayCanvas ? highwayCanvas.clientHeight : 0;
-                        _disposeScene();
+                        if (!_disposeScene()) {
+                            // WebGL renderer re-init failed — don't build a
+                            // scene that would draw into nothing. Mark not
+                            // ready and fully tear down so the plugin fails
+                            // loudly rather than freezing half-initialised.
+                            _isReady = false;
+                            teardown();
+                            return;
+                        }
                         initScene();
                         applySize(w, h);
                     };

@@ -206,12 +206,15 @@
             kit.lanes.forEach((ln, i) => {
                 const row = document.createElement('div');
                 row.className = 'flex items-center gap-2 px-2 py-1 bg-dark-700/60 rounded';
+                // Screen readers should hear the user-facing label
+                // ("Hi-hat (closed)") not the internal piece id ("hh_closed").
+                const pieceName = friendly(ln.piece);
                 row.innerHTML =
                     `<span class="font-mono text-[10px] text-gray-500 w-6 text-center">${i}</span>` +
-                    `<span class="flex-1 text-xs text-gray-300">${friendly(ln.piece)}</span>` +
-                    `<button type="button" data-act="up"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${ln.piece} up">▲</button>` +
-                    `<button type="button" data-act="down" data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === kit.lanes.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move ${ln.piece} down">▼</button>` +
-                    `<button type="button" data-act="rm"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-red-400 hover:text-red-300" title="Remove from kit" aria-label="Remove ${ln.piece} from kit">✗</button>`;
+                    `<span class="flex-1 text-xs text-gray-300">${pieceName}</span>` +
+                    `<button type="button" data-act="up"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${pieceName} up">▲</button>` +
+                    `<button type="button" data-act="down" data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === kit.lanes.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move ${pieceName} down">▼</button>` +
+                    `<button type="button" data-act="rm"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-red-400 hover:text-red-300" title="Remove from kit" aria-label="Remove ${pieceName} from kit">✗</button>`;
                 lanesEl.appendChild(row);
             });
             lanesEl.querySelectorAll('button').forEach(btn => {
