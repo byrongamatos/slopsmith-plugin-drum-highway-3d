@@ -774,7 +774,10 @@
         const preset = _drumPresets[midiNote];
         if (!preset) return;
         _synthEnsureCtx();
-        const vol = ((velocity || 100) / 127) * _synthVolume;
+        // Velocity-to-volume: normalise to 0-1. The overall slider level is
+        // already applied by _synthGain (its gain.value == _synthVolume), so
+        // don't multiply here — that would square the volume.
+        const vol = (velocity || 100) / 127;
         // 0.5 s queue duration — drum samples are short, no sustain needed.
         _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, 0, midiNote, 0.5, vol);
     }
@@ -1812,6 +1815,8 @@
             disposeMaterialArray(mCymbalHitByLane);
             disposeMaterialArray(mCymbalMissByLane);
             if (mKick) mKick.dispose();
+            if (mKickHit) mKickHit.dispose();
+            if (mKickMiss) mKickMiss.dispose();
             if (mAccentRing) mAccentRing.dispose();
             if (mGhostRing) mGhostRing.dispose();
             if (mSnareStripe) mSnareStripe.dispose();
@@ -1826,7 +1831,7 @@
             if (gFlamGrace) gFlamGrace.dispose();
             if (ren) ren.dispose();
             scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = null;
-            mDrumByLane = mCymbalByLane = mKick = null;
+            mDrumByLane = mCymbalByLane = mKick = mKickHit = mKickMiss = null;
             mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
             gDrumDisc = gCymbalGem = gKickBar = null;
@@ -1873,6 +1878,8 @@
             disposeMaterialArray(mCymbalHitByLane);
             disposeMaterialArray(mCymbalMissByLane);
             if (mKick) mKick.dispose();
+            if (mKickHit) mKickHit.dispose();
+            if (mKickMiss) mKickMiss.dispose();
             if (mAccentRing) mAccentRing.dispose();
             if (mGhostRing) mGhostRing.dispose();
             if (mSnareStripe) mSnareStripe.dispose();
@@ -1887,7 +1894,7 @@
             if (gFlamGrace) gFlamGrace.dispose();
             if (ren) ren.dispose();
             scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = null;
-            mDrumByLane = mCymbalByLane = mKick = null;
+            mDrumByLane = mCymbalByLane = mKick = mKickHit = mKickMiss = null;
             mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
             gDrumDisc = gCymbalGem = gKickBar = null;
