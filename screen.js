@@ -647,6 +647,7 @@
     let _synthGain = null;
     let _synthVolume = 0.7;
     let _playerScriptLoaded = false;
+    let _synthInitInFlight = null;    // shared promise while _synthInit is running
     const _drumPresets = {};   // midiNote -> WebAudioFont preset
 
     function _loadScript(url) {
@@ -686,6 +687,11 @@
 
     async function _synthInit() {
         if (_synthPlayer) return;
+        // Guard against concurrent calls: if a prior call is still awaiting
+        // script/preset loads, share its promise so only one AudioContext and
+        // one WebAudioFontPlayer are ever created per tab.
+        if (_synthInitInFlight) return _synthInitInFlight;
+        _synthInitInFlight = (async () => {
         try {
             const raw = _readStore(LS_SYNTH_VOL);
             const parsed = raw === null ? NaN : parseFloat(raw);
@@ -715,7 +721,11 @@
             await _synthLoadKit();
         } catch (e) {
             console.warn('[Drum-Hwy3D] Synth init failed:', e);
+        } finally {
+            _synthInitInFlight = null;
         }
+        })();
+        return _synthInitInFlight;
     }
 
     async function _synthLoadKit() {

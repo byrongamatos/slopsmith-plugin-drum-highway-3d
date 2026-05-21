@@ -208,9 +208,9 @@
                 row.innerHTML =
                     `<span class="font-mono text-[10px] text-gray-500 w-6 text-center">${i}</span>` +
                     `<span class="flex-1 text-xs text-gray-300">${friendly(ln.piece)}</span>` +
-                    `<button type="button" data-act="up"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === 0 ? 'disabled' : ''} title="Move up">▲</button>` +
-                    `<button type="button" data-act="down" data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === kit.lanes.length - 1 ? 'disabled' : ''} title="Move down">▼</button>` +
-                    `<button type="button" data-act="rm"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-red-400 hover:text-red-300" title="Remove from kit">✗</button>`;
+                    `<button type="button" data-act="up"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${ln.piece} up">▲</button>` +
+                    `<button type="button" data-act="down" data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === kit.lanes.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move ${ln.piece} down">▼</button>` +
+                    `<button type="button" data-act="rm"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-red-400 hover:text-red-300" title="Remove from kit" aria-label="Remove ${ln.piece} from kit">✗</button>`;
                 lanesEl.appendChild(row);
             });
             lanesEl.querySelectorAll('button').forEach(btn => {
@@ -326,15 +326,23 @@
             copyToClipboard() {
                 const b64 = window.drumH3dExportKit && window.drumH3dExportKit();
                 if (!b64) return setStatus('export failed', 'err');
+                const _showImportFallback = (str) => {
+                    // Clipboard unavailable — reveal the import row so the user can
+                    // copy the string from the textarea manually.
+                    document.getElementById('drumh3d-kit-import-row').classList.remove('hidden');
+                    const ta = document.getElementById('drumh3d-kit-import-text');
+                    ta.value = str;
+                    ta.focus();
+                    ta.select();
+                    setStatus('clipboard blocked — copy from the textarea below', 'err');
+                };
                 if (!navigator.clipboard) {
-                    // Clipboard API unavailable (non-secure context or blocked).
-                    setStatus('clipboard blocked — paste the string from the textarea', 'err');
-                    document.getElementById('drumh3d-kit-import-text').value = b64;
+                    _showImportFallback(b64);
                     return;
                 }
                 navigator.clipboard.writeText(b64).then(
                     () => setStatus('✓ kit copied', 'ok'),
-                    () => setStatus('clipboard blocked — paste into the textarea', 'err'),
+                    () => _showImportFallback(b64),
                 );
             },
             importFromTextarea() {
