@@ -960,6 +960,8 @@
         let mCymbalHitByLane = null;
         let mCymbalMissByLane = null;
         let mKick = null;           // Kick bar material
+        let mKickHit = null;        // Pre-cloned hit tint for kick
+        let mKickMiss = null;       // Pre-cloned miss tint for kick
         let mAccentRing = null;     // Halo material for accents
         let mGhostRing = null;      // Hollow ring material for ghost notes
         let mSnareStripe = null;    // White snare wire material
@@ -1202,6 +1204,8 @@
                 }
             }
             if (mKick) mKick.dispose();
+            if (mKickHit) mKickHit.dispose();
+            if (mKickMiss) mKickMiss.dispose();
             mKick = new T.MeshStandardMaterial({
                 color: KICK_COLOR,
                 emissive: KICK_COLOR,
@@ -1209,6 +1213,12 @@
                 roughness: 0.4,
                 metalness: 0.2,
             });
+            mKickHit = mKick.clone();
+            mKickHit.color.setHex(0x22c55e);
+            mKickHit.emissive.setHex(0x22c55e);
+            mKickMiss = mKick.clone();
+            mKickMiss.color.setHex(0xef4444);
+            mKickMiss.emissive.setHex(0xef4444);
         }
 
         function disposeMaterialArray(arr) {
@@ -1464,6 +1474,7 @@
                         side: T.DoubleSide,
                     });
                     ghostMat.userData.transient = true;
+                    ghostMat.userData.isGhostRing = true;
                     const ring = new T.Mesh(gGhostRing, ghostMat);
                     ring.rotation.x = -Math.PI / 2;
                     ring.scale.setScalar(scale);
@@ -1663,21 +1674,32 @@
             // per-note material.clone() calls while notesGroup is rebuilt.
             if (status === 'hit' || status === 'missed') {
                 const isHit = status === 'hit';
-                const tintDrum = isHit ? mDrumHitByLane[note.lane] : mDrumMissByLane[note.lane];
-                const tintCymbal = isHit ? mCymbalHitByLane[note.lane] : mCymbalMissByLane[note.lane];
-                const ghostColor = isHit ? 0x00ff88 : 0xff4444;
-                mesh.traverse((child) => {
-                    if (!child.isMesh || !child.material) return;
-                    const isBase = child.material === mDrumByLane[note.lane];
-                    const isCym = child.material === mCymbalByLane[note.lane];
-                    // Ghost notes use a per-note transient MeshBasicMaterial
-                    // (the ring mesh). Tint it in-place — it's already unique
-                    // per note so no clone is needed.
-                    const isGhost = child.material.userData && child.material.userData.transient;
-                    if (isBase && tintDrum) child.material = tintDrum;
-                    else if (isCym && tintCymbal) child.material = tintCymbal;
-                    else if (isGhost) child.material.color.setHex(ghostColor);
-                });
+                if (laneCfg.kind === 'kick') {
+                    // Kick uses a single shared bar — swap to the pre-cloned
+                    // tint material for consistent hit/miss feedback.
+                    const tintKick = isHit ? mKickHit : mKickMiss;
+                    mesh.traverse((child) => {
+                        if (!child.isMesh || !child.material) return;
+                        if (child.material === mKick && tintKick) child.material = tintKick;
+                    });
+                } else {
+                    const tintDrum = isHit ? mDrumHitByLane[note.lane] : mDrumMissByLane[note.lane];
+                    const tintCymbal = isHit ? mCymbalHitByLane[note.lane] : mCymbalMissByLane[note.lane];
+                    const ghostColor = isHit ? 0x00ff88 : 0xff4444;
+                    mesh.traverse((child) => {
+                        if (!child.isMesh || !child.material) return;
+                        const isBase = child.material === mDrumByLane[note.lane];
+                        const isCym = child.material === mCymbalByLane[note.lane];
+                        // Ghost ring uses a dedicated per-note MeshBasicMaterial
+                        // with userData.isGhostRing — tint it in-place (already
+                        // unique per note, no clone needed). Not the same as the
+                        // kick accent edge which only sets userData.transient.
+                        const isGhostRing = child.material.userData && child.material.userData.isGhostRing;
+                        if (isBase && tintDrum) child.material = tintDrum;
+                        else if (isCym && tintCymbal) child.material = tintCymbal;
+                        else if (isGhostRing) child.material.color.setHex(ghostColor);
+                    });
+                }
             }
 
             notesGroup.add(mesh);
