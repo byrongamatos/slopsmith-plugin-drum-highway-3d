@@ -551,7 +551,6 @@
     window.drumH3dGetPiecePaletteIdx = function () {
         return Object.assign({}, PIECE_PALETTE_IDX, { kick: -1 });
     };
-    };
     window.drumH3dSetKit = function (raw) {
         const kit = _validateKit(raw);
         if (!kit) return false;
@@ -631,7 +630,7 @@
         // opened first), read from localStorage so the settings slider shows
         // the persisted value rather than the default 0.70.
         if (!_synthPlayer) {
-            const raw = _readStore('drum_h3d_synth_vol');
+            const raw = _readStore(LS_SYNTH_VOL);
             const parsed = raw === null ? NaN : parseFloat(raw);
             if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) return parsed;
         }
