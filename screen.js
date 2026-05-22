@@ -159,6 +159,14 @@
     // (top up on load) from "user explicitly dropped fallback X" (leave
     // alone). v2 added `stack` and `bell`.
     const KIT_SCHEMA_VERSION = 2;
+    // Per-version list of fallback keys introduced at that version. The
+    // migration tops up ONLY these on first load after an upgrade, so a
+    // pre-existing fallback the user explicitly dropped at v1 (e.g.
+    // crash_r → ride) doesn't get silently restored just because their
+    // saved kit predates v2.
+    const _FALLBACKS_ADDED_AT_VERSION = {
+        2: ['stack', 'bell'],
+    };
 
     // Default kit — replicates the prior hardcoded 7-piece + kick layout.
     // Users without a saved kit see exactly what the mockup originally
@@ -230,18 +238,20 @@
             cleanFb[from] = to;
         }
         // Version-gated migration: older saved kits don't have fallback
-        // entries for pieces added after the kit was saved (e.g. stack,
-        // bell at v2). Top up from DEFAULT_KIT.fallbacks ONLY on the
-        // first load after an upgrade — once the kit is saved back at
-        // the current schema version, any subsequent user-deleted
-        // fallbacks persist (settings.html's "— drop —" option removes
-        // the key; we mustn't re-add it on every page load).
+        // entries for pieces ADDED after the kit was saved. Top up only
+        // those newly-introduced keys per version bump — not the whole
+        // DEFAULT_KIT.fallbacks dict — so a fallback the user explicitly
+        // dropped at an older version isn't silently restored.
         const savedVersion = Number(raw.version) || 0;
         if (savedVersion < KIT_SCHEMA_VERSION) {
-            for (const [from, to] of Object.entries(DEFAULT_KIT.fallbacks)) {
-                if (from in cleanFb) continue;
-                if (!seenPieces.has(to)) continue;
-                cleanFb[from] = to;
+            for (let v = savedVersion + 1; v <= KIT_SCHEMA_VERSION; v++) {
+                const newKeys = _FALLBACKS_ADDED_AT_VERSION[v] || [];
+                for (const from of newKeys) {
+                    if (from in cleanFb) continue;
+                    const to = DEFAULT_KIT.fallbacks[from];
+                    if (!to || !seenPieces.has(to)) continue;
+                    cleanFb[from] = to;
+                }
             }
         }
         return {
