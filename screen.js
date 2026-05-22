@@ -154,11 +154,17 @@
         bell: 3,
     };
 
+    // Bumped each time the default fallbacks gain a new entry so we can
+    // distinguish "saved kit is missing fallback X because it predates X"
+    // (top up on load) from "user explicitly dropped fallback X" (leave
+    // alone). v2 added `stack` and `bell`.
+    const KIT_SCHEMA_VERSION = 2;
+
     // Default kit — replicates the prior hardcoded 7-piece + kick layout.
     // Users without a saved kit see exactly what the mockup originally
     // showed.
     const DEFAULT_KIT = {
-        version: 1,
+        version: KIT_SCHEMA_VERSION,
         name: 'Default 7-piece',
         // Lanes in order (left-to-right on the highway). The kick is a
         // special full-width bar at the bottom — its position in this
@@ -223,20 +229,23 @@
             if (!seenPieces.has(to)) continue;
             cleanFb[from] = to;
         }
-        // Migration: older saved kits don't have fallback entries for
-        // pieces added after the kit was saved (e.g. stack, bell). Top
-        // up from DEFAULT_KIT.fallbacks for any piece the user hasn't
-        // explicitly overridden, so a new chart-piece doesn't silently
-        // drop just because the user opened the page before we added it.
-        // Only add a default fallback when its target lane is in the
-        // user's kit (consistent with the validation just above).
-        for (const [from, to] of Object.entries(DEFAULT_KIT.fallbacks)) {
-            if (from in cleanFb) continue;
-            if (!seenPieces.has(to)) continue;
-            cleanFb[from] = to;
+        // Version-gated migration: older saved kits don't have fallback
+        // entries for pieces added after the kit was saved (e.g. stack,
+        // bell at v2). Top up from DEFAULT_KIT.fallbacks ONLY on the
+        // first load after an upgrade — once the kit is saved back at
+        // the current schema version, any subsequent user-deleted
+        // fallbacks persist (settings.html's "— drop —" option removes
+        // the key; we mustn't re-add it on every page load).
+        const savedVersion = Number(raw.version) || 0;
+        if (savedVersion < KIT_SCHEMA_VERSION) {
+            for (const [from, to] of Object.entries(DEFAULT_KIT.fallbacks)) {
+                if (from in cleanFb) continue;
+                if (!seenPieces.has(to)) continue;
+                cleanFb[from] = to;
+            }
         }
         return {
-            version: 1,
+            version: KIT_SCHEMA_VERSION,
             name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : 'Custom kit',
             lanes: cleanLanes,
             fallbacks: cleanFb,
@@ -323,9 +332,12 @@
 
     // Resolve a drum_tab hit's visual variant. Order matters and is
     // intentional: ghost > flam > bell (piece-derived) > accent. A bell
-    // piece always shows the bell dot, even at high velocity — the bell
-    // visual is more specific than accent and the two would overlap
-    // confusingly. (Ghost is intentionally quiet so its flag dominates.)
+    // piece returns the 'bell' variant even at high velocity — but the
+    // actual bell-dot glyph is only drawn by the ride-shaped renderer
+    // (see buildNoteMesh: `laneCfg.subKind === 'ride'`). If the user
+    // routes `bell`/`ride_bell` to a non-ride lane via fallbacks, the
+    // hit still scores correctly but renders as that lane's default
+    // shape. (Ghost is intentionally quiet so its flag dominates.)
     function _variantForHit(hit) {
         if (hit.g) return 'ghost';
         if (hit.f) return 'flam';
