@@ -96,8 +96,10 @@
         'snare', 'snare_xstick',
         'hh_closed', 'hh_open', 'hh_pedal',
         'tom_hi', 'tom_mid', 'tom_low', 'tom_floor',
+        'stack',
         'crash_l', 'crash_r', 'splash', 'china',
         'ride', 'ride_bell',
+        'bell',
     ];
     const PIECE_LABELS = {
         kick:         'KICK',
@@ -110,28 +112,34 @@
         tom_mid:      'TM2',
         tom_low:      'TM3',
         tom_floor:    'FT',
+        stack:        'STK',
         crash_l:      'CRl',
         crash_r:      'CRr',
         splash:       'SPL',
         china:        'CHN',
         ride:         'RD',
         ride_bell:    'BLL',
+        bell:         'BL',
     };
     const PIECE_CATEGORY = {
         kick: 'kick',
         snare: 'drum', snare_xstick: 'drum',
         hh_closed: 'cymbal', hh_open: 'cymbal', hh_pedal: 'cymbal',
         tom_hi: 'drum', tom_mid: 'drum', tom_low: 'drum', tom_floor: 'drum',
+        stack: 'cymbal',
         crash_l: 'cymbal', crash_r: 'cymbal', splash: 'cymbal', china: 'cymbal',
         ride: 'cymbal', ride_bell: 'cymbal',
+        bell: 'cymbal',
     };
     const PIECE_SUBKIND = {
         kick: 'kick',
         snare: 'snare', snare_xstick: 'snare',
         hh_closed: 'hihat', hh_open: 'hihat', hh_pedal: 'hihat',
         tom_hi: 'tom', tom_mid: 'tom', tom_low: 'tom', tom_floor: 'tom',
+        stack: 'crash',
         crash_l: 'crash', crash_r: 'crash', splash: 'crash', china: 'crash',
         ride: 'ride', ride_bell: 'ride',
+        bell: 'ride',
     };
     // Palette index per piece — chosen so the default 7-lane kit reads
     // the same colours as the original hardcoded LANES layout.
@@ -140,8 +148,10 @@
         snare: 0, snare_xstick: 0,
         hh_closed: 7, hh_open: 7, hh_pedal: 7,
         tom_hi: 4, tom_mid: 2, tom_low: 5, tom_floor: 5,
+        stack: 1,
         crash_l: 1, crash_r: 1, splash: 1, china: 1,
         ride: 3, ride_bell: 3,
+        bell: 3,
     };
 
     // Default kit — replicates the prior hardcoded 7-piece + kick layout.
