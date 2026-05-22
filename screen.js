@@ -223,6 +223,18 @@
             if (!seenPieces.has(to)) continue;
             cleanFb[from] = to;
         }
+        // Migration: older saved kits don't have fallback entries for
+        // pieces added after the kit was saved (e.g. stack, bell). Top
+        // up from DEFAULT_KIT.fallbacks for any piece the user hasn't
+        // explicitly overridden, so a new chart-piece doesn't silently
+        // drop just because the user opened the page before we added it.
+        // Only add a default fallback when its target lane is in the
+        // user's kit (consistent with the validation just above).
+        for (const [from, to] of Object.entries(DEFAULT_KIT.fallbacks)) {
+            if (from in cleanFb) continue;
+            if (!seenPieces.has(to)) continue;
+            cleanFb[from] = to;
+        }
         return {
             version: 1,
             name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : 'Custom kit',
@@ -681,12 +693,12 @@
     // "Mute Triangle") aren't in the soundfont's drum kit; route them to
     // a close cymbal sample so the pad isn't silent.
     // Fallback MIDI must itself be in DRUM_MIDI_NOTES. The soundfont
-    // doesn't ship 53 (Ride Bell) either, so both the new `bell` piece
-    // and the pre-existing 53/ride_bell input route to 51 (Ride).
+    // doesn't ship 53 either, so both the new `bell` piece and the
+    // pre-existing 53/ride_bell input route to 51 (Ride).
     const _AUDIO_FALLBACK_MIDI = {
-        30: 49,  // stack       → Crash 1
-        53: 51,  // ride_bell   → Ride (53 isn't in the loaded preset set)
-        80: 51,  // bell        → Ride (same)
+        30: 49,  // stack pad     → 49 (closest loaded crash)
+        53: 51,  // ride_bell pad → 51 (closest loaded ride; 53 not loaded)
+        80: 51,  // bell pad      → 51 (same)
     };
     const LS_SYNTH_VOL = 'drum_h3d_synth_vol';
 
