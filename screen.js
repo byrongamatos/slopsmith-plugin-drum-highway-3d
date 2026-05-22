@@ -331,6 +331,7 @@
     // baseline and the settings UI can override later. Multiple MIDI notes
     // can map to the same piece-id (e.g. 35 & 36 both → kick).
     const MIDI_TO_PIECE = {
+        30: 'stack',
         35: 'kick',         36: 'kick',
         37: 'snare_xstick',
         38: 'snare',        40: 'snare',
@@ -347,6 +348,7 @@
         53: 'ride_bell',
         55: 'splash',
         57: 'crash_r',
+        80: 'bell',
     };
 
     // ±50 ms hit window — same as the 2D drums plugin so users get
