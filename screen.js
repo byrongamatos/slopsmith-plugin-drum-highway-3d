@@ -676,6 +676,14 @@
     // 2D plugin's DRUM_MIDI_NOTES; adding entries here would just download
     // 404s if the soundfont doesn't ship them.
     const DRUM_MIDI_NOTES = [35, 36, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 57, 59];
+    // Per-MIDI playback fallback when the JCLive soundfont has no native
+    // preset for the note. Stack (30 = "Reverse Cymbal") and bell (80 =
+    // "Mute Triangle") aren't in the soundfont's drum kit; route them to
+    // a close cymbal sample so the pad isn't silent.
+    const _AUDIO_FALLBACK_MIDI = {
+        30: 49,  // stack → Crash 1
+        80: 53,  // bell  → Ride Bell
+    };
     const LS_SYNTH_VOL = 'drum_h3d_synth_vol';
 
     let _audioCtx = null;
@@ -790,7 +798,17 @@
 
     function _synthDrumHit(midiNote, velocity) {
         if (!_synthPlayer || !_audioCtx || !_synthGain) return;
-        const preset = _drumPresets[midiNote];
+        // Direct preset preferred; fall back to a closely-related MIDI
+        // for notes the soundfont doesn't ship (stack 30, bell 80).
+        let preset = _drumPresets[midiNote];
+        let playNote = midiNote;
+        if (!preset) {
+            const fb = _AUDIO_FALLBACK_MIDI[midiNote];
+            if (fb !== undefined && _drumPresets[fb]) {
+                preset = _drumPresets[fb];
+                playNote = fb;
+            }
+        }
         if (!preset) return;
         _synthEnsureCtx();
         // Velocity-to-volume: normalise to 0-1. The overall slider level is
@@ -798,7 +816,7 @@
         // don't multiply here — that would square the volume.
         const vol = (velocity || 100) / 127;
         // 0.5 s queue duration — drum samples are short, no sustain needed.
-        _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, 0, midiNote, 0.5, vol);
+        _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, 0, playNote, 0.5, vol);
     }
 
     function _synthSetVolume(v) {
