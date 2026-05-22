@@ -181,8 +181,10 @@
             snare_xstick: 'snare',
             hh_open: 'hh_closed', hh_pedal: 'hh_closed',
             tom_low: 'tom_mid',
+            stack: 'crash_l',
             crash_r: 'crash_l', splash: 'crash_l', china: 'crash_l',
             ride_bell: 'ride',
+            bell: 'ride',
         },
     };
 
