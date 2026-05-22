@@ -680,9 +680,11 @@
     // preset for the note. Stack (30 = "Reverse Cymbal") and bell (80 =
     // "Mute Triangle") aren't in the soundfont's drum kit; route them to
     // a close cymbal sample so the pad isn't silent.
+    // Fallback MIDI must itself be in DRUM_MIDI_NOTES — the soundfont
+    // doesn't ship 53 (Ride Bell), so bell routes to 51 (Ride) instead.
     const _AUDIO_FALLBACK_MIDI = {
         30: 49,  // stack → Crash 1
-        80: 53,  // bell  → Ride Bell
+        80: 51,  // bell  → Ride (53/Ride-Bell not in the loaded preset set)
     };
     const LS_SYNTH_VOL = 'drum_h3d_synth_vol';
 
