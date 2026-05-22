@@ -309,11 +309,11 @@
     }
     _rebuildPieceToLaneMap(_activeKit);
 
-    // Resolve a drum_tab hit's visual variant. Order matters: ghost wins over
-    // accent (ghost notes are intentionally quiet so their flag dominates),
-    // flam adds the leading grace disc, both ride_bell (the ride's bell) and
-    // the dedicated `bell` cymbal get the bright bell dot. A loud non-ghost
-    // hit (v >= 100) is an accent.
+    // Resolve a drum_tab hit's visual variant. Order matters and is
+    // intentional: ghost > flam > bell (piece-derived) > accent. A bell
+    // piece always shows the bell dot, even at high velocity — the bell
+    // visual is more specific than accent and the two would overlap
+    // confusingly. (Ghost is intentionally quiet so its flag dominates.)
     function _variantForHit(hit) {
         if (hit.g) return 'ghost';
         if (hit.f) return 'flam';
@@ -680,11 +680,13 @@
     // preset for the note. Stack (30 = "Reverse Cymbal") and bell (80 =
     // "Mute Triangle") aren't in the soundfont's drum kit; route them to
     // a close cymbal sample so the pad isn't silent.
-    // Fallback MIDI must itself be in DRUM_MIDI_NOTES — the soundfont
-    // doesn't ship 53 (Ride Bell), so bell routes to 51 (Ride) instead.
+    // Fallback MIDI must itself be in DRUM_MIDI_NOTES. The soundfont
+    // doesn't ship 53 (Ride Bell) either, so both the new `bell` piece
+    // and the pre-existing 53/ride_bell input route to 51 (Ride).
     const _AUDIO_FALLBACK_MIDI = {
-        30: 49,  // stack → Crash 1
-        80: 51,  // bell  → Ride (53/Ride-Bell not in the loaded preset set)
+        30: 49,  // stack       → Crash 1
+        53: 51,  // ride_bell   → Ride (53 isn't in the loaded preset set)
+        80: 51,  // bell        → Ride (same)
     };
     const LS_SYNTH_VOL = 'drum_h3d_synth_vol';
 
