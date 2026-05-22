@@ -311,12 +311,13 @@
 
     // Resolve a drum_tab hit's visual variant. Order matters: ghost wins over
     // accent (ghost notes are intentionally quiet so their flag dominates),
-    // flam adds the leading grace disc, ride_bell adds the bright dot. A
-    // loud non-ghost hit (v >= 100) is an accent.
+    // flam adds the leading grace disc, both ride_bell (the ride's bell) and
+    // the dedicated `bell` cymbal get the bright bell dot. A loud non-ghost
+    // hit (v >= 100) is an accent.
     function _variantForHit(hit) {
         if (hit.g) return 'ghost';
         if (hit.f) return 'flam';
-        if (hit.p === 'ride_bell') return 'bell';
+        if (hit.p === 'ride_bell' || hit.p === 'bell') return 'bell';
         const v = typeof hit.v === 'number' ? hit.v : 100;
         if (v >= 100) return 'accent';
         return 'normal';
