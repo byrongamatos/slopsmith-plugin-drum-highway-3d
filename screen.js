@@ -157,8 +157,8 @@
     // Line-art SVG icons drawn just past the hit line so the user can tell
     // at a glance which physical piece each lane represents. Authored as
     // inner-path strings — _drumIconSVG wraps them in a 64×64 viewBox with
-    // white strokes (the lane's MeshBasicMaterial.color multiplies through,
-    // so they read as white-on-floor regardless of palette).
+    // white strokes; the icon mesh uses a plain white MeshBasicMaterial so
+    // the SVG renders unmodified regardless of palette.
     const DRUM_ICON_PATHS = {
         kick:         "<circle cx='32' cy='32' r='24'/><circle cx='32' cy='32' r='7'/>",
         snare:        "<circle cx='32' cy='32' r='22'/><line x1='14' y1='42' x2='50' y2='42'/><line x1='14' y1='46' x2='50' y2='46'/><line x1='14' y1='50' x2='50' y2='50'/>",
@@ -1327,14 +1327,17 @@
             for (let i = 0; i < laneGroup.children.length; i++) {
                 const stripe = laneGroup.children[i];
                 const mat = stripe.material;
-                if (mat._baseColor === undefined) {
-                    mat._baseColor = mat.color.getHex();
-                    mat._baseOpacity = mat.opacity;
+                // Stash idle colour/opacity in userData so we don't collide
+                // with Three.js internals or future material-clone copies.
+                const ud = mat.userData;
+                if (ud.flashBaseColor === undefined) {
+                    ud.flashBaseColor = mat.color.getHex();
+                    ud.flashBaseOpacity = mat.opacity;
                 }
                 const flash = newest.get(i);
                 if (!flash) {
-                    mat.color.setHex(mat._baseColor);
-                    mat.opacity = mat._baseOpacity;
+                    mat.color.setHex(ud.flashBaseColor);
+                    mat.opacity = ud.flashBaseOpacity;
                     continue;
                 }
                 const age = now - flash.wall;
@@ -1342,9 +1345,9 @@
                 const flashHex = (flash.kind === 'hit') ? FLASH_HIT_HEX : FLASH_WRONG_HEX;
                 // Lerp base → flash colour by t so the stripe washes back to
                 // its idle teal/blue as the flash decays.
-                mat.color.setHex(mat._baseColor)
+                mat.color.setHex(ud.flashBaseColor)
                     .lerp(_flashTmpColor.setHex(flashHex), t);
-                mat.opacity = mat._baseOpacity + (FLASH_PEAK_OPACITY - mat._baseOpacity) * t;
+                mat.opacity = ud.flashBaseOpacity + (FLASH_PEAK_OPACITY - ud.flashBaseOpacity) * t;
             }
         }
 
@@ -1666,6 +1669,17 @@
             }
             if (scene) scene.remove(iconGroup);
             iconGroup = null;
+        }
+
+        function _disposeLaneGroup() {
+            if (!laneGroup) return;
+            while (laneGroup.children.length) {
+                const c = laneGroup.children.pop();
+                if (c.geometry) c.geometry.dispose();
+                if (c.material) c.material.dispose();
+            }
+            if (scene) scene.remove(laneGroup);
+            laneGroup = null;
         }
 
         function buildIcons() {
@@ -2261,25 +2275,11 @@
                     if (c.material) c.material.dispose();
                 }
             }
-            // Dispose laneGroup stripe meshes (PlaneGeometry + MeshBasicMaterial per
-            // lane) so kit-change rebuilds don't leak GPU resources.
-            if (laneGroup) {
-                while (laneGroup.children.length) {
-                    const c = laneGroup.children.pop();
-                    if (c.geometry) c.geometry.dispose();
-                    if (c.material) c.material.dispose();
-                }
-            }
-            if (iconGroup) {
-                while (iconGroup.children.length) {
-                    const c = iconGroup.children.pop();
-                    if (c.geometry) c.geometry.dispose();
-                    if (c.material) {
-                        if (c.material.map) c.material.map.dispose();
-                        c.material.dispose();
-                    }
-                }
-            }
+            // laneGroup + iconGroup go through dedicated helpers so the
+            // dispose path stays in one place (avoids drift between
+            // _disposeScene / teardown).
+            _disposeLaneGroup();
+            _disposeIconGroup();
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
             disposeMaterialArray(mDrumHitByLane);
@@ -2302,7 +2302,7 @@
             if (gBellDot) gBellDot.dispose();
             if (gFlamGrace) gFlamGrace.dispose();
             if (ren) ren.dispose();
-            scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = iconGroup = null;
+            scene = cam = ren = lights = kitMapGroup = notesGroup = null;
             mDrumByLane = mCymbalByLane = mKick = mKickHit = mKickMiss = null;
             mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
@@ -2350,16 +2350,8 @@
                     if (c.material) c.material.dispose();
                 }
             }
-            if (iconGroup) {
-                while (iconGroup.children.length) {
-                    const c = iconGroup.children.pop();
-                    if (c.geometry) c.geometry.dispose();
-                    if (c.material) {
-                        if (c.material.map) c.material.map.dispose();
-                        c.material.dispose();
-                    }
-                }
-            }
+            _disposeLaneGroup();
+            _disposeIconGroup();
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
             disposeMaterialArray(mDrumHitByLane);
@@ -2382,7 +2374,7 @@
             if (gBellDot) gBellDot.dispose();
             if (gFlamGrace) gFlamGrace.dispose();
             if (ren) ren.dispose();
-            scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = iconGroup = null;
+            scene = cam = ren = lights = kitMapGroup = notesGroup = null;
             mDrumByLane = mCymbalByLane = mKick = mKickHit = mKickMiss = null;
             mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;

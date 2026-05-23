@@ -238,9 +238,16 @@
                 // ("Hi-hat (closed)") not the internal piece id ("hh_closed").
                 const pieceName = friendly(ln.piece);
                 // Custom icon override marker — localStorage may throw in
-                // private mode; treat that as "no override" silently.
+                // private mode; treat that as "no override" silently. Mirror
+                // screen.js's MIME-prefix check so a malformed/non-image
+                // stored value isn't treated as a custom icon (the renderer
+                // would ignore it, but the UI would mislead the user into
+                // thinking one was set).
                 let hasCustomIcon = false;
-                try { hasCustomIcon = !!localStorage.getItem('drum_h3d_icon_' + ln.piece); } catch (_) { /* ignore */ }
+                try {
+                    const stored = localStorage.getItem('drum_h3d_icon_' + ln.piece);
+                    hasCustomIcon = !!stored && /^data:image\/(png|jpe?g|svg\+xml|webp|gif);/i.test(stored);
+                } catch (_) { /* ignore */ }
                 const iconBtnLabel = hasCustomIcon
                     ? `Replace icon for ${pieceName} (custom set)`
                     : `Upload icon for ${pieceName}`;
