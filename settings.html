@@ -447,6 +447,15 @@
                 camVal.textContent = c.toFixed(2);
             }
 
+            // Sync the slider's min/max from the renderer's bounds API
+            // so a future SCROLL_SPEED_MIN/MAX retune in screen.js
+            // can't leave the UI slider range out of date relative to
+            // the runtime clamp. The HTML attrs (min/max/value) act as
+            // fallbacks while JS hasn't run yet.
+            if (speed) {
+                speed.min = String(speedBounds.min);
+                speed.max = String(speedBounds.max);
+            }
             const storedSpeed = parseFloat(localStorage.getItem('drum_h3d_scroll_speed'));
             if (Number.isFinite(storedSpeed) && speed && speedVal) {
                 const s = Math.min(speedBounds.max,

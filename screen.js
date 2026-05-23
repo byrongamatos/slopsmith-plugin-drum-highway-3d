@@ -1308,10 +1308,13 @@
                 settings.cameraAngle = Math.min(1, Math.max(0, detail.cameraAngle));
                 positionCamera();
             }
-            if (typeof detail.scrollSpeed === 'number') {
+            if (Number.isFinite(detail.scrollSpeed)) {
                 // No re-init needed — settings.scrollSpeed is read at
                 // each rebuildNotes() / placeNote() call so the next
-                // frame already reflects the new speed.
+                // frame already reflects the new speed. isFinite (not
+                // `typeof ... === 'number'`) so a NaN slipping in via
+                // a malformed event can't land in settings — NaN would
+                // survive Math.min/Math.max and break note positions.
                 settings.scrollSpeed = Math.min(SCROLL_SPEED_MAX,
                     Math.max(SCROLL_SPEED_MIN, detail.scrollSpeed));
             }
