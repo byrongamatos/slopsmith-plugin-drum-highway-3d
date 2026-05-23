@@ -1304,7 +1304,10 @@
             if (detail.pattern && DEMO_PATTERNS[detail.pattern]) {
                 settings.pattern = detail.pattern;
             }
-            if (typeof detail.cameraAngle === 'number') {
+            if (Number.isFinite(detail.cameraAngle)) {
+                // isFinite (not typeof ... === 'number') so a NaN event
+                // can't pin positionCamera() into NaN — same guard the
+                // scrollSpeed branch uses just below.
                 settings.cameraAngle = Math.min(1, Math.max(0, detail.cameraAngle));
                 positionCamera();
             }
