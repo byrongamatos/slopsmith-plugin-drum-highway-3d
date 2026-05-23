@@ -189,12 +189,14 @@
     function _drumIconDataURL(piece) {
         // localStorage user override beats the bundled SVG. Stored as a
         // ready-to-use data URL (image/png from FileReader) so we don't
-        // re-encode on every kit rebuild. Restrict to image/* data URLs so
-        // a malformed stored value (or one set by a different feature) can't
-        // wedge a lane into a permanent broken-image state.
+        // re-encode on every kit rebuild. Restrict to raster image/* data
+        // URLs only: SVGs from untrusted sources can reference external
+        // resources (<image href>, <use href>, foreignObject) and we don't
+        // want to ship that attack surface for user uploads. Bundled SVGs
+        // (returned by _drumIconBundledURL) are author-controlled and stay.
         try {
             const stored = localStorage.getItem('drum_h3d_icon_' + piece);
-            if (stored && /^data:image\/(png|jpe?g|svg\+xml|webp|gif);/i.test(stored)) {
+            if (stored && /^data:image\/(png|jpe?g|webp|gif);/i.test(stored)) {
                 return stored;
             }
         } catch (_) { /* private mode — fall through */ }
@@ -1741,9 +1743,13 @@
                         // Custom upload turned out to be unloadable (corrupt
                         // payload, unsupported codec, decode failed). Swap in
                         // the bundled SVG so the lane never sticks with an
-                        // empty texture.
+                        // empty texture — AND drop the broken override from
+                        // localStorage so the next rebuild doesn't retry the
+                        // same corrupt payload (and the settings UI stops
+                        // claiming a custom icon is set).
                         const fallback = _drumIconBundledURL(piece);
                         if (url === fallback) return;
+                        try { localStorage.removeItem('drum_h3d_icon_' + piece); } catch (_) { /* ignore */ }
                         loader.load(fallback, attach);
                     }
                 );

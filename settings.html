@@ -246,7 +246,7 @@
                 let hasCustomIcon = false;
                 try {
                     const stored = localStorage.getItem('drum_h3d_icon_' + ln.piece);
-                    hasCustomIcon = !!stored && /^data:image\/(png|jpe?g|svg\+xml|webp|gif);/i.test(stored);
+                    hasCustomIcon = !!stored && /^data:image\/(png|jpe?g|webp|gif);/i.test(stored);
                 } catch (_) { /* ignore */ }
                 const iconBtnLabel = hasCustomIcon
                     ? `Replace icon for ${pieceName} (custom set)`
@@ -273,7 +273,11 @@
                         const piece = btn.dataset.piece;
                         const f = document.createElement('input');
                         f.type = 'file';
-                        f.accept = 'image/png,image/jpeg,image/svg+xml,image/webp,image/gif';
+                        // SVG intentionally not on the allow-list — user
+                        // SVGs can reference external network resources
+                        // (<image href>, <use href>, foreignObject). PNG /
+                        // JPG / WebP / GIF are pure raster, no side effects.
+                        f.accept = 'image/png,image/jpeg,image/webp,image/gif';
                         f.onchange = () => {
                             const file = f.files && f.files[0];
                             if (!file) return;
@@ -285,8 +289,8 @@
                                 // can't store a value the renderer will reject.
                                 const result = reader.result;
                                 if (typeof result !== 'string' ||
-                                    !/^data:image\/(png|jpe?g|svg\+xml|webp|gif);/i.test(result)) {
-                                    setStatus('That file isn’t a supported image (PNG / JPG / SVG / WebP / GIF)', 'err');
+                                    !/^data:image\/(png|jpe?g|webp|gif);/i.test(result)) {
+                                    setStatus('That file isn’t a supported image (PNG / JPG / WebP / GIF)', 'err');
                                     return;
                                 }
                                 try {
