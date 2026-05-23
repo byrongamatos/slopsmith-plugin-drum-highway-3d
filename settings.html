@@ -151,8 +151,10 @@
                 snare: 0, snare_xstick: 0,
                 hh_closed: 7, hh_open: 7, hh_pedal: 7,
                 tom_hi: 4, tom_mid: 2, tom_low: 5, tom_floor: 5,
+                stack: 1,
                 crash_l: 1, crash_r: 1, splash: 1, china: 1,
                 ride: 3, ride_bell: 3,
+                bell: 3,
             };
             for (let i = 0; i < 8; i++) {
                 const el = document.getElementById('drumh3d-swatch-' + i);
@@ -178,8 +180,10 @@
             snare: 'Snare', snare_xstick: 'Snare (cross-stick)',
             hh_closed: 'Hi-hat (closed)', hh_open: 'Hi-hat (open)', hh_pedal: 'Hi-hat (pedal)',
             tom_hi: 'Tom — high', tom_mid: 'Tom — mid', tom_low: 'Tom — low', tom_floor: 'Floor tom',
+            stack: 'Stack',
             crash_l: 'Crash (left)', crash_r: 'Crash (right)', splash: 'Splash', china: 'China',
             ride: 'Ride', ride_bell: 'Ride bell',
+            bell: 'Bell cymbal',
         };
         function friendly(p) { return FRIENDLY[p] || p; }
 

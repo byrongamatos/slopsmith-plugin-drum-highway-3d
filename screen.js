@@ -266,7 +266,16 @@
         try {
             const raw = localStorage.getItem(LS_KIT_CONFIG);
             if (!raw) return null;
-            return _validateKit(JSON.parse(raw));
+            const parsed = JSON.parse(raw);
+            const kit = _validateKit(parsed);
+            // If the validator migrated the saved kit (older version,
+            // added fallback keys), write it back so the migration runs
+            // once and not on every page load. Compare versions on the
+            // raw object — kit is always stamped to current.
+            if (kit && Number(parsed?.version) < KIT_SCHEMA_VERSION) {
+                _writeKitConfig(kit);
+            }
+            return kit;
         } catch (_) { return null; }
     }
 
