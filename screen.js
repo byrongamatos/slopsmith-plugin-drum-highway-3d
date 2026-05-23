@@ -1893,10 +1893,16 @@
             // since shrinking just the main reads as enough miss-feedback.
             if (note.variant === 'flam' && laneCfg.kind === 'drum') {
                 const graceDt = dt + FLAM_GRACE_OFFSET;
-                if (graceDt >= -BEHIND && graceDt <= AHEAD) {
+                // Use the same speed-adjusted dt-window the main loop
+                // applies — otherwise at high speed the grace marker
+                // spawns past the visible window, and at low speed
+                // far-ahead grace notes are culled when their main
+                // note is still visible.
+                const _gMul = settings.scrollSpeed || 1;
+                if (graceDt >= -BEHIND / _gMul && graceDt <= AHEAD / _gMul) {
                     const grace = new T.Mesh(gFlamGrace, mDrumByLane[note.lane]);
                     grace.position.set(x - DISC_R_BASE * 0.9, y,
-                                       -graceDt * TS * (settings.scrollSpeed || 1));
+                                       -graceDt * TS * _gMul);
                     notesGroup.add(grace);
                 }
             }
