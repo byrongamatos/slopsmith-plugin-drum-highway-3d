@@ -1806,7 +1806,7 @@
                 // same (placeNote multiplies Z by speedMul). At
                 // speedMul=2 we show half the song-time and notes
                 // traverse the same screen distance twice as fast.
-                const _speedMul = settings.scrollSpeed || 1;
+                const _speedMul = settings.scrollSpeed || SCROLL_SPEED_DEFAULT;
                 const _aheadDt = AHEAD / _speedMul;
                 const _behindDt = BEHIND / _speedMul;
                 // Binary-search the first note within the visible
@@ -1853,7 +1853,7 @@
             if (!pat) return;
             const now = performance.now() / 1000 - t0;
             const phase = now % pat.length;
-            const _speedMul = settings.scrollSpeed || 1;
+            const _speedMul = settings.scrollSpeed || SCROLL_SPEED_DEFAULT;
             const _aheadDt = AHEAD / _speedMul;
             const _behindDt = BEHIND / _speedMul;
             for (let cycle = -1; cycle <= 1; cycle++) {
@@ -1874,7 +1874,7 @@
             // setting moves notes the same screen distance in less
             // song-time (paired with the smaller dt-window in the
             // caller). speedMul = 1 reproduces the original behaviour.
-            const z = -dt * TS * (settings.scrollSpeed || 1);
+            const z = -dt * TS * (settings.scrollSpeed || SCROLL_SPEED_DEFAULT);
             const x = laneCfg.kind === 'kick' ? 0 : (LANE_X0 + note.lane * LANE_GAP);
             const y = laneCfg.kind === 'kick' ? 0 : DISC_H * 0.5;
 
@@ -1888,7 +1888,7 @@
             // they need to shrink proportionally, otherwise the cue
             // would fire while the note is still visually far from
             // the hit line.
-            const _speedMul = settings.scrollSpeed || 1;
+            const _speedMul = settings.scrollSpeed || SCROLL_SPEED_DEFAULT;
             const proximity = Math.max(0, 1 - Math.abs(dt) * _speedMul / 0.6);
             if (laneCfg.kind === 'drum' && note.variant !== 'ghost' && mDrumByLane[note.lane]) {
                 // Subtle pulse via emissiveIntensity — palette-driven base + pulse.
@@ -1953,7 +1953,7 @@
                 // spawns past the visible window, and at low speed
                 // far-ahead grace notes are culled when their main
                 // note is still visible.
-                const _gMul = settings.scrollSpeed || 1;
+                const _gMul = settings.scrollSpeed || SCROLL_SPEED_DEFAULT;
                 if (graceDt >= -BEHIND / _gMul && graceDt <= AHEAD / _gMul) {
                     const grace = new T.Mesh(gFlamGrace, mDrumByLane[note.lane]);
                     grace.position.set(x - DISC_R_BASE * 0.9, y,

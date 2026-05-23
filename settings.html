@@ -456,12 +456,19 @@
                 speed.min = String(speedBounds.min);
                 speed.max = String(speedBounds.max);
             }
+            // Initialise from storage if present, otherwise from the
+            // renderer's bounds.default — so a future SCROLL_SPEED_
+            // DEFAULT retune in screen.js doesn't leave the slider
+            // pinned to whatever HTML value="..." baked in.
             const storedSpeed = parseFloat(localStorage.getItem('drum_h3d_scroll_speed'));
-            if (Number.isFinite(storedSpeed) && speed && speedVal) {
-                const s = Math.min(speedBounds.max,
-                                   Math.max(speedBounds.min, storedSpeed));
-                speed.value = String(s);
-                speedVal.textContent = s.toFixed(2) + 'x';
+            const speedInit = Number.isFinite(storedSpeed)
+                ? Math.min(speedBounds.max, Math.max(speedBounds.min, storedSpeed))
+                : (Number.isFinite(speedBounds.default)
+                    ? speedBounds.default
+                    : NaN);
+            if (Number.isFinite(speedInit) && speed && speedVal) {
+                speed.value = String(speedInit);
+                speedVal.textContent = speedInit.toFixed(2) + 'x';
             }
         } catch (e) {
             console.warn('[Drum-Hwy3D settings] hydration failed:', e);
