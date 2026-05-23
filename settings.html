@@ -42,6 +42,34 @@
         <p class="text-xs text-gray-500 mt-1">0 = down the lanes · 1 = top-down</p>
     </div>
 
+    <!-- Scroll speed -->
+    <div class="mt-4">
+        <label for="drumh3d-scroll-speed" class="text-xs font-medium text-gray-400 mb-1 block">
+            Scroll speed <span id="drumh3d-scroll-speed-val" class="text-gray-500 font-mono">1.00x</span>
+        </label>
+        <input type="range" id="drumh3d-scroll-speed"
+            min="0.5" max="3" step="0.05" value="1"
+            oninput="window.drumH3dSetScrollSpeed && window.drumH3dSetScrollSpeed(this.value); document.getElementById('drumh3d-scroll-speed-val').textContent = parseFloat(this.value).toFixed(2) + 'x'"
+            class="w-full">
+        <p class="text-xs text-gray-500 mt-1">Higher = notes traverse the highway faster (less density for fast songs).</p>
+    </div>
+    <script>
+        // Hydrate the scroll-speed slider from localStorage so a saved
+        // value shows up immediately when settings.html opens.
+        (function () {
+            try {
+                const raw = localStorage.getItem('drum_h3d_scroll_speed');
+                const v = raw != null ? parseFloat(raw) : NaN;
+                if (Number.isFinite(v)) {
+                    const slider = document.getElementById('drumh3d-scroll-speed');
+                    const label = document.getElementById('drumh3d-scroll-speed-val');
+                    if (slider) slider.value = String(v);
+                    if (label) label.textContent = v.toFixed(2) + 'x';
+                }
+            } catch (_) { /* localStorage unavailable */ }
+        })();
+    </script>
+
     <!-- MIDI input -->
     <div class="mt-6 border-t border-gray-800 pt-4">
         <h4 class="text-xs font-medium text-gray-300 mb-2">MIDI input</h4>

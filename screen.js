@@ -1002,12 +1002,22 @@
         palette: 'drum_h3d_palette',
         pattern: 'drum_h3d_pattern',
         cameraAngle: 'drum_h3d_camera_angle',
+        scrollSpeed: 'drum_h3d_scroll_speed',
     };
+
+    // Scroll-speed multiplier (1.0 = baseline TS). User-tunable so fast
+    // metal charts don't look giga-dense. Clamped to a sane range — too
+    // slow and the user can't anticipate hits; too fast and notes spawn
+    // beyond reaction time.
+    const SCROLL_SPEED_MIN = 0.5;
+    const SCROLL_SPEED_MAX = 3.0;
+    const SCROLL_SPEED_DEFAULT = 1.0;
 
     function readSettings() {
         let palette = 'default';
         let pattern = 'rock_backbeat';
         let cameraAngle = 0.35; // 0 = looking down the lanes, 1 = top-down
+        let scrollSpeed = SCROLL_SPEED_DEFAULT;
         try {
             const p = localStorage.getItem(LS_KEYS.palette);
             if (p && PALETTES[p]) palette = p;
@@ -1015,8 +1025,13 @@
             if (pat && DEMO_PATTERNS[pat]) pattern = pat;
             const ca = parseFloat(localStorage.getItem(LS_KEYS.cameraAngle));
             if (Number.isFinite(ca)) cameraAngle = Math.min(1, Math.max(0, ca));
+            const ss = parseFloat(localStorage.getItem(LS_KEYS.scrollSpeed));
+            if (Number.isFinite(ss)) {
+                scrollSpeed = Math.min(SCROLL_SPEED_MAX,
+                                       Math.max(SCROLL_SPEED_MIN, ss));
+            }
         } catch (_) { /* localStorage unavailable — use defaults */ }
-        return { palette, pattern, cameraAngle };
+        return { palette, pattern, cameraAngle, scrollSpeed };
     }
 
     // Expose setters so settings.html can poke a live preview without a
@@ -1036,6 +1051,21 @@
         const c = Math.min(1, Math.max(0, Number(v) || 0));
         try { localStorage.setItem(LS_KEYS.cameraAngle, String(c)); } catch (_) {}
         window.dispatchEvent(new CustomEvent('drum_h3d:settings', { detail: { cameraAngle: c } }));
+    };
+    window.drumH3dSetScrollSpeed = function (v) {
+        const s = Math.min(SCROLL_SPEED_MAX,
+                           Math.max(SCROLL_SPEED_MIN, Number(v) || SCROLL_SPEED_DEFAULT));
+        try { localStorage.setItem(LS_KEYS.scrollSpeed, String(s)); } catch (_) {}
+        window.dispatchEvent(new CustomEvent('drum_h3d:settings', { detail: { scrollSpeed: s } }));
+    };
+    // Expose the slider bounds so settings.html can stay in sync if we
+    // ever retune the range (and so it can show the bounds as labels).
+    window.drumH3dScrollSpeedBounds = function () {
+        return {
+            min: SCROLL_SPEED_MIN,
+            max: SCROLL_SPEED_MAX,
+            default: SCROLL_SPEED_DEFAULT,
+        };
     };
 
     /* ======================================================================
@@ -1271,6 +1301,13 @@
             if (typeof detail.cameraAngle === 'number') {
                 settings.cameraAngle = Math.min(1, Math.max(0, detail.cameraAngle));
                 positionCamera();
+            }
+            if (typeof detail.scrollSpeed === 'number') {
+                // No re-init needed — settings.scrollSpeed is read at
+                // each rebuildNotes() / placeNote() call so the next
+                // frame already reflects the new speed.
+                settings.scrollSpeed = Math.min(SCROLL_SPEED_MAX,
+                    Math.max(SCROLL_SPEED_MIN, detail.scrollSpeed));
             }
         }
 
@@ -1561,6 +1598,15 @@
             const group = new T.Group();
 
             if (laneCfg.kind === 'kick') {
+                // Kick is a full-width bar that spans every lane — if
+                // rendered AFTER same-time hand hits it occludes them
+                // (notes are added in time order, so a hand hit at the
+                // same `t` as a kick lands beneath the kick bar). A
+                // negative renderOrder forces the kick to draw first;
+                // hand notes then pass the depth test at the same Z
+                // and overwrite — so kicks visually sit BENEATH the
+                // hand hits instead of on top.
+                group.renderOrder = -1;
                 const bar = new T.Mesh(gKickBar, mKick);
                 if (variant === 'accent') bar.scale.setScalar(ACCENT_SCALE);
                 group.add(bar);
@@ -1725,10 +1771,18 @@
                 // red tint). The match is keyed on (t, lane), same as hit
                 // detection — multiple piece-ids on a lane (crash_l +
                 // crash_r) share the visual feedback.
+                // Scroll-speed scaling: scale the visible dt-window
+                // INVERSELY so the floor's physical extent stays the
+                // same (placeNote multiplies Z by speedMul). At
+                // speedMul=2 we show half the song-time and notes
+                // traverse the same screen distance twice as fast.
+                const _speedMul = settings.scrollSpeed || 1;
+                const _aheadDt = AHEAD / _speedMul;
+                const _behindDt = BEHIND / _speedMul;
                 for (const note of _cachedRealNotes) {
                     const dt = note.t - t;
-                    if (dt > AHEAD) break;
-                    if (dt < -BEHIND) continue;
+                    if (dt > _aheadDt) break;
+                    if (dt < -_behindDt) continue;
                     const key = _hitKey(note.t, note.lane);
                     const status = _hitKeys.has(key) ? 'hit' :
                                    _missedKeys.has(key) ? 'missed' :
@@ -1752,11 +1806,14 @@
             if (!pat) return;
             const now = performance.now() / 1000 - t0;
             const phase = now % pat.length;
+            const _speedMul = settings.scrollSpeed || 1;
+            const _aheadDt = AHEAD / _speedMul;
+            const _behindDt = BEHIND / _speedMul;
             for (let cycle = -1; cycle <= 1; cycle++) {
                 const cycleBase = cycle * pat.length;
                 for (const note of pat.notes) {
                     const dt = note.t + cycleBase - phase;
-                    if (dt < -BEHIND || dt > AHEAD) continue;
+                    if (dt < -_behindDt || dt > _aheadDt) continue;
                     placeNote(note, dt);
                 }
             }
@@ -1766,7 +1823,11 @@
             const laneCfg = LANES[note.lane];
             if (!laneCfg) return;
 
-            const z = -dt * TS;            // dt > 0 → upstream (negative Z)
+            // Note Z scales by speedMul so a higher user scroll-speed
+            // setting moves notes the same screen distance in less
+            // song-time (paired with the smaller dt-window in the
+            // caller). speedMul = 1 reproduces the original behaviour.
+            const z = -dt * TS * (settings.scrollSpeed || 1);
             const x = laneCfg.kind === 'kick' ? 0 : (LANE_X0 + note.lane * LANE_GAP);
             const y = laneCfg.kind === 'kick' ? 0 : DISC_H * 0.5;
 
@@ -1834,7 +1895,8 @@
                 const graceDt = dt + FLAM_GRACE_OFFSET;
                 if (graceDt >= -BEHIND && graceDt <= AHEAD) {
                     const grace = new T.Mesh(gFlamGrace, mDrumByLane[note.lane]);
-                    grace.position.set(x - DISC_R_BASE * 0.9, y, -graceDt * TS);
+                    grace.position.set(x - DISC_R_BASE * 0.9, y,
+                                       -graceDt * TS * (settings.scrollSpeed || 1));
                     notesGroup.add(grace);
                 }
             }
