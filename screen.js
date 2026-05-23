@@ -1630,7 +1630,19 @@
                     // are per-note — flag both as transient so disposeMeshTree
                     // releases them when the note recycles.
                     const edgeGeo = new T.BoxGeometry(KICK_W * 0.96, KICK_H * 1.05, 0.6 * K);
-                    const edgeMat = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
+                    // depthWrite:false so the edge — which sits CLOSER to
+                    // the camera than the kick body — doesn't poison the
+                    // depth buffer for hand hits at the same beat (they
+                    // share the kick body's Z, not the edge's). Without
+                    // this, renderOrder alone can't save us: the edge
+                    // would write its closer depth and a later hand hit
+                    // at the body's Z would fail the depth test.
+                    const edgeMat = new T.MeshBasicMaterial({
+                        color: 0xffffff,
+                        transparent: true,
+                        opacity: 0.9,
+                        depthWrite: false,
+                    });
                     edgeGeo.userData.transient = true;
                     edgeMat.userData.transient = true;
                     const edge = new T.Mesh(edgeGeo, edgeMat);
@@ -1794,10 +1806,27 @@
                 const _speedMul = settings.scrollSpeed || 1;
                 const _aheadDt = AHEAD / _speedMul;
                 const _behindDt = BEHIND / _speedMul;
-                for (const note of _cachedRealNotes) {
+                // Binary-search the first note within the visible
+                // window so a long chart doesn't pay O(N) per frame
+                // skipping passed notes. The for-loop still early-
+                // breaks at the far edge; this just cheap-skips the
+                // already-elapsed prefix. Works through seeks
+                // (forwards or backwards) since we re-search each
+                // frame against the current `t`.
+                const _windowStart = t - _behindDt;
+                let _lo = 0;
+                let _hi = _cachedRealNotes.length;
+                while (_lo < _hi) {
+                    const _mid = (_lo + _hi) >> 1;
+                    if (_cachedRealNotes[_mid].t < _windowStart) _lo = _mid + 1;
+                    else _hi = _mid;
+                }
+                for (let _i = _lo; _i < _cachedRealNotes.length; _i++) {
+                    const note = _cachedRealNotes[_i];
                     const dt = note.t - t;
                     if (dt > _aheadDt) break;
-                    if (dt < -_behindDt) continue;
+                    // The binary search guarantees dt >= -_behindDt so
+                    // the old continue-on-stale check is now redundant.
                     const key = _hitKey(note.t, note.lane);
                     const status = _hitKeys.has(key) ? 'hit' :
                                    _missedKeys.has(key) ? 'missed' :
