@@ -237,9 +237,27 @@
                 // Screen readers should hear the user-facing label
                 // ("Hi-hat (closed)") not the internal piece id ("hh_closed").
                 const pieceName = friendly(ln.piece);
+                // Custom icon override marker — localStorage may throw in
+                // private mode; treat that as "no override" silently. Mirror
+                // screen.js's MIME-prefix check so a malformed/non-image
+                // stored value isn't treated as a custom icon (the renderer
+                // would ignore it, but the UI would mislead the user into
+                // thinking one was set).
+                let hasCustomIcon = false;
+                try {
+                    const stored = localStorage.getItem('drum_h3d_icon_' + ln.piece);
+                    hasCustomIcon = !!stored && /^data:image\/(png|jpe?g|webp|gif);/i.test(stored);
+                } catch (_) { /* ignore */ }
+                const iconBtnLabel = hasCustomIcon
+                    ? `Replace icon for ${pieceName} (custom set)`
+                    : `Upload icon for ${pieceName}`;
                 row.innerHTML =
                     `<span class="font-mono text-[10px] text-gray-500 w-6 text-center">${i}</span>` +
                     `<span class="flex-1 text-xs text-gray-300">${pieceName}</span>` +
+                    `<button type="button" data-act="icon" data-piece="${ln.piece}" class="px-1.5 py-0.5 text-xs ${hasCustomIcon ? 'text-emerald-400 hover:text-emerald-300' : 'text-gray-400 hover:text-white'}" title="${iconBtnLabel}" aria-label="${iconBtnLabel}">🖼️</button>` +
+                    (hasCustomIcon
+                        ? `<button type="button" data-act="icon-rm" data-piece="${ln.piece}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" title="Reset icon for ${pieceName} to default" aria-label="Reset icon for ${pieceName} to default">↺</button>`
+                        : '') +
                     `<button type="button" data-act="up"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === 0 ? 'disabled' : ''} title="Move up" aria-label="Move ${pieceName} up">▲</button>` +
                     `<button type="button" data-act="down" data-i="${i}" class="px-1.5 py-0.5 text-xs text-gray-400 hover:text-white" ${i === kit.lanes.length - 1 ? 'disabled' : ''} title="Move down" aria-label="Move ${pieceName} down">▼</button>` +
                     `<button type="button" data-act="rm"   data-i="${i}" class="px-1.5 py-0.5 text-xs text-red-400 hover:text-red-300" title="Remove from kit" aria-label="Remove ${pieceName} from kit">✗</button>`;
@@ -247,8 +265,59 @@
             });
             lanesEl.querySelectorAll('button').forEach(btn => {
                 btn.onclick = () => {
-                    const i = parseInt(btn.dataset.i, 10);
                     const act = btn.dataset.act;
+                    // Icon-upload + icon-reset don't mutate the kit object;
+                    // they live in localStorage and use the `drum_h3d:icons`
+                    // event so the 3D scene reloads only the icon planes.
+                    if (act === 'icon') {
+                        const piece = btn.dataset.piece;
+                        const f = document.createElement('input');
+                        f.type = 'file';
+                        // SVG intentionally not on the allow-list — user
+                        // SVGs can reference external network resources
+                        // (<image href>, <use href>, foreignObject). PNG /
+                        // JPG / WebP / GIF are pure raster, no side effects.
+                        f.accept = 'image/png,image/jpeg,image/webp,image/gif';
+                        f.onchange = () => {
+                            const file = f.files && f.files[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = () => {
+                                // Validate before persisting so an unexpected
+                                // MIME (some browsers ignore the `accept` hint
+                                // for drag-drop, or the file extension lies)
+                                // can't store a value the renderer will reject.
+                                const result = reader.result;
+                                if (typeof result !== 'string' ||
+                                    !/^data:image\/(png|jpe?g|webp|gif);/i.test(result)) {
+                                    setStatus('That file isn’t a supported image (PNG / JPG / WebP / GIF)', 'err');
+                                    return;
+                                }
+                                try {
+                                    localStorage.setItem('drum_h3d_icon_' + piece, result);
+                                    window.dispatchEvent(new CustomEvent('drum_h3d:icons', { detail: { piece } }));
+                                    renderKit();
+                                    setStatus('Icon updated for ' + friendly(piece), 'ok');
+                                } catch (e) {
+                                    // QuotaExceededError on big files (typically >2-5 MB
+                                    // depending on browser) — tell the user instead of
+                                    // silently dropping it.
+                                    setStatus('Icon too large — try a smaller image', 'err');
+                                }
+                            };
+                            reader.onerror = () => setStatus('Could not read that file', 'err');
+                            reader.readAsDataURL(file);
+                        };
+                        f.click();
+                        return;
+                    }
+                    if (act === 'icon-rm') {
+                        try { localStorage.removeItem('drum_h3d_icon_' + btn.dataset.piece); } catch (_) { /* ignore */ }
+                        window.dispatchEvent(new CustomEvent('drum_h3d:icons', { detail: { piece: btn.dataset.piece } }));
+                        renderKit();
+                        return;
+                    }
+                    const i = parseInt(btn.dataset.i, 10);
                     const next = JSON.parse(JSON.stringify(kit));
                     if (act === 'up' && i > 0) {
                         [next.lanes[i - 1], next.lanes[i]] = [next.lanes[i], next.lanes[i - 1]];

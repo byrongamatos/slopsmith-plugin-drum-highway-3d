@@ -154,6 +154,55 @@
         bell: 3,
     };
 
+    // Line-art SVG icons drawn just past the hit line so the user can tell
+    // at a glance which physical piece each lane represents. Authored as
+    // inner-path strings — _drumIconSVG wraps them in a 64×64 viewBox with
+    // white strokes; the icon mesh uses a plain white MeshBasicMaterial so
+    // the SVG renders unmodified regardless of palette.
+    const DRUM_ICON_PATHS = {
+        kick:         "<circle cx='32' cy='32' r='24'/><circle cx='32' cy='32' r='7'/>",
+        snare:        "<circle cx='32' cy='32' r='22'/><line x1='14' y1='42' x2='50' y2='42'/><line x1='14' y1='46' x2='50' y2='46'/><line x1='14' y1='50' x2='50' y2='50'/>",
+        snare_xstick: "<circle cx='32' cy='32' r='22'/><line x1='20' y1='20' x2='44' y2='44'/><line x1='44' y1='20' x2='20' y2='44'/>",
+        tom_hi:       "<ellipse cx='32' cy='22' rx='12' ry='4'/><ellipse cx='32' cy='40' rx='12' ry='4'/><line x1='20' y1='22' x2='20' y2='40'/><line x1='44' y1='22' x2='44' y2='40'/>",
+        tom_mid:      "<ellipse cx='32' cy='20' rx='14' ry='4'/><ellipse cx='32' cy='44' rx='14' ry='4'/><line x1='18' y1='20' x2='18' y2='44'/><line x1='46' y1='20' x2='46' y2='44'/>",
+        tom_low:      "<ellipse cx='32' cy='18' rx='16' ry='4'/><ellipse cx='32' cy='46' rx='16' ry='4'/><line x1='16' y1='18' x2='16' y2='46'/><line x1='48' y1='18' x2='48' y2='46'/>",
+        tom_floor:    "<ellipse cx='32' cy='16' rx='18' ry='4'/><ellipse cx='32' cy='44' rx='18' ry='4'/><line x1='14' y1='16' x2='14' y2='44'/><line x1='50' y1='16' x2='50' y2='44'/><line x1='18' y1='44' x2='18' y2='58'/><line x1='32' y1='44' x2='32' y2='58'/><line x1='46' y1='44' x2='46' y2='58'/>",
+        hh_closed:    "<ellipse cx='32' cy='26' rx='22' ry='4'/><ellipse cx='32' cy='32' rx='22' ry='4'/><line x1='32' y1='32' x2='32' y2='54'/>",
+        hh_open:      "<ellipse cx='32' cy='22' rx='22' ry='4'/><ellipse cx='32' cy='36' rx='22' ry='4'/><line x1='32' y1='36' x2='32' y2='54'/>",
+        hh_pedal:     "<ellipse cx='32' cy='28' rx='22' ry='4'/><line x1='14' y1='44' x2='50' y2='44'/><line x1='14' y1='44' x2='14' y2='50'/><line x1='50' y1='44' x2='50' y2='50'/>",
+        stack:        "<ellipse cx='32' cy='22' rx='22' ry='3'/><ellipse cx='32' cy='28' rx='22' ry='3'/><ellipse cx='32' cy='34' rx='22' ry='3'/>",
+        crash_l:      "<path d='M 8 38 L 56 22'/><path d='M 8 42 L 56 26'/><circle cx='32' cy='30' r='2.5'/>",
+        crash_r:      "<path d='M 8 22 L 56 38'/><path d='M 8 26 L 56 42'/><circle cx='32' cy='30' r='2.5'/>",
+        splash:       "<ellipse cx='32' cy='30' rx='14' ry='3'/><ellipse cx='32' cy='34' rx='14' ry='3'/><circle cx='32' cy='32' r='2'/>",
+        china:        "<path d='M 8 38 L 24 26 L 40 26 L 56 38'/><path d='M 8 42 L 24 30 L 40 30 L 56 42'/>",
+        ride:         "<ellipse cx='32' cy='30' rx='26' ry='4'/><ellipse cx='32' cy='34' rx='26' ry='4'/><circle cx='32' cy='32' r='4'/>",
+        ride_bell:    "<ellipse cx='32' cy='32' rx='26' ry='4'/><circle cx='32' cy='30' r='9'/><circle cx='32' cy='30' r='3'/>",
+        bell:         "<path d='M 18 50 L 22 22 Q 32 14 42 22 L 46 50 Z'/><line x1='14' y1='50' x2='50' y2='50'/>",
+    };
+    function _drumIconSVG(piece) {
+        const inner = DRUM_ICON_PATHS[piece] || DRUM_ICON_PATHS.snare;
+        return "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64' width='128' height='128' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'>" + inner + "</svg>";
+    }
+    function _drumIconBundledURL(piece) {
+        return 'data:image/svg+xml;utf8,' + encodeURIComponent(_drumIconSVG(piece));
+    }
+    function _drumIconDataURL(piece) {
+        // localStorage user override beats the bundled SVG. Stored as a
+        // ready-to-use data URL (image/png from FileReader) so we don't
+        // re-encode on every kit rebuild. Restrict to raster image/* data
+        // URLs only: SVGs from untrusted sources can reference external
+        // resources (<image href>, <use href>, foreignObject) and we don't
+        // want to ship that attack surface for user uploads. Bundled SVGs
+        // (returned by _drumIconBundledURL) are author-controlled and stay.
+        try {
+            const stored = localStorage.getItem('drum_h3d_icon_' + piece);
+            if (stored && /^data:image\/(png|jpe?g|webp|gif);/i.test(stored)) {
+                return stored;
+            }
+        } catch (_) { /* private mode — fall through */ }
+        return _drumIconBundledURL(piece);
+    }
+
     // Bumped each time the default fallbacks gain a new entry so we can
     // distinguish "saved kit is missing fallback X because it predates X"
     // (top up on load) from "user explicitly dropped fallback X" (leave
@@ -1134,6 +1183,7 @@
         let laneGroup = null;       // lane stripes + dividers
         let kitMapGroup = null;     // top-of-highway kit silhouette
         let notesGroup = null;      // all currently-visible notes (recreated each frame)
+        let iconGroup = null;       // per-lane drum icons just past the hit line
 
         // Cached materials — palette-driven, rebuilt on palette swap.
         let mDrumByLane = null;     // Mesh material per lane (drum lanes)
@@ -1168,6 +1218,7 @@
         let _isReady = false;
         let _settingsHandler = null;
         let _kitHandler = null;
+        let _iconsHandler = null;
 
         /* ── Hit detection + scoring (per-instance) ──────────────── */
         // _hitKeys / _missedKeys: note keys (t|lane) of drum_tab hits the
@@ -1243,18 +1294,62 @@
                 (_bestStreak ? `<div style="color:#94a3b8;font-size:11px">best ${_bestStreak}</div>` : '');
         }
 
-        /* ── Lane flash — pulse a lane's emissive briefly on hit ── */
+        /* ── Lane flash — whole-lane stripe pulses green/red on hit ─ */
         // Wallclock decay window — matches the 2D plugin's 300 ms flash.
         const FLASH_MS = 300;
+        const FLASH_HIT_HEX = 0x22c55e;    // green-500 — clean hit
+        const FLASH_WRONG_HEX = 0xef4444;  // red-500   — mis-hit / wrong lane
+        const FLASH_PEAK_OPACITY = 0.85;
+        // Lazy-init scratch Color — T is null until three.js finishes loading.
+        let _flashTmpColor = null;
 
         function _applyLaneFlashes() {
-            // No longer used for visual feedback (chart notes now turn
-            // green/red on hit/miss via placeNote). Still drop expired
-            // entries from the buffer so the array doesn't grow forever
-            // if MIDI hits arrive while no chart is loaded.
             const now = performance.now();
+            // Drop expired entries from the head.
             while (_laneFlashes.length && now - _laneFlashes[0].wall > FLASH_MS) {
                 _laneFlashes.shift();
+            }
+            if (!laneGroup || !laneGroup.children.length) return;
+            if (!_flashTmpColor) _flashTmpColor = new T.Color();
+            // For each lane, find the most-recent active flash. A "wrong"
+            // event with lane = -1 means no specific lane was identified;
+            // light up every lane briefly so the user sees the miss.
+            const newest = new Map();
+            for (const f of _laneFlashes) {
+                if (f.lane < 0) {
+                    for (let i = 0; i < laneGroup.children.length; i++) {
+                        const ex = newest.get(i);
+                        if (!ex || f.wall > ex.wall) newest.set(i, f);
+                    }
+                } else if (f.lane < laneGroup.children.length) {
+                    const ex = newest.get(f.lane);
+                    if (!ex || f.wall > ex.wall) newest.set(f.lane, f);
+                }
+            }
+            for (let i = 0; i < laneGroup.children.length; i++) {
+                const stripe = laneGroup.children[i];
+                const mat = stripe.material;
+                // Stash idle colour/opacity in userData so we don't collide
+                // with Three.js internals or future material-clone copies.
+                const ud = mat.userData;
+                if (ud.flashBaseColor === undefined) {
+                    ud.flashBaseColor = mat.color.getHex();
+                    ud.flashBaseOpacity = mat.opacity;
+                }
+                const flash = newest.get(i);
+                if (!flash) {
+                    mat.color.setHex(ud.flashBaseColor);
+                    mat.opacity = ud.flashBaseOpacity;
+                    continue;
+                }
+                const age = now - flash.wall;
+                const t = Math.max(0, Math.min(1, 1 - age / FLASH_MS));
+                const flashHex = (flash.kind === 'hit') ? FLASH_HIT_HEX : FLASH_WRONG_HEX;
+                // Lerp base → flash colour by t so the stripe washes back to
+                // its idle teal/blue as the flash decays.
+                mat.color.setHex(ud.flashBaseColor)
+                    .lerp(_flashTmpColor.setHex(flashHex), t);
+                mat.opacity = ud.flashBaseOpacity + (FLASH_PEAK_OPACITY - ud.flashBaseOpacity) * t;
             }
         }
 
@@ -1478,6 +1573,9 @@
             // Build lane stripes / dividers (static).
             buildLanes(floorW, floorD);
 
+            // Per-lane drum icons (just past the hit line).
+            buildIcons();
+
             // Build the kit silhouette backboard.
             kitMapGroup = new T.Group();
             scene.add(kitMapGroup);
@@ -1561,6 +1659,124 @@
             cam.lookAt(0, 0, -AHEAD * TS * 0.45);
         }
 
+        function _disposeIconGroup() {
+            if (!iconGroup) return;
+            while (iconGroup.children.length) {
+                const c = iconGroup.children.pop();
+                if (c.geometry) c.geometry.dispose();
+                if (c.material) {
+                    if (c.material.map) c.material.map.dispose();
+                    c.material.dispose();
+                }
+            }
+            if (scene) scene.remove(iconGroup);
+            iconGroup = null;
+        }
+
+        function _disposeLaneGroup() {
+            if (!laneGroup) return;
+            while (laneGroup.children.length) {
+                const c = laneGroup.children.pop();
+                if (c.geometry) c.geometry.dispose();
+                if (c.material) c.material.dispose();
+            }
+            if (scene) scene.remove(laneGroup);
+            laneGroup = null;
+        }
+
+        function buildIcons() {
+            // Per-lane drum icons as camera-facing billboards parked just
+            // toward the camera from the hit bar so they read as floating
+            // BELOW the hit line in screen-space. Hand lanes each get one;
+            // the kick (LANES.length > LANE_COUNT) gets one parked off to
+            // the LEFT of the highway rather than across the kick bar.
+            iconGroup = new T.Group();
+            const ICON_W = LANE_GAP * 0.6;              // small enough to stay below hit bar
+            const ICON_HALF = ICON_W * 0.5;
+            // Centre is lifted so the icon's BOTTOM kisses the floor —
+            // visually anchored to the lane, with the top edge just
+            // clearing it.
+            const ICON_Y = -0.25 * K + ICON_HALF;
+            const ICON_Z = 7 * K;                       // toward camera from hit bar
+            const loader = new T.TextureLoader();
+            const tuneTexture = (t) => {
+                if ('colorSpace' in t && T.SRGBColorSpace) t.colorSpace = T.SRGBColorSpace;
+                t.anisotropy = 4;
+            };
+            const make = (piece, x, w) => {
+                // Build the material + mesh up-front so the load/error
+                // callbacks (which may fire synchronously for data URIs
+                // depending on the browser's image cache) don't hit a TDZ
+                // on `mat`. Callbacks receive the texture as an argument
+                // and never close over `tex` / `fb` from the outer scope.
+                const mat = new T.MeshBasicMaterial({
+                    color: 0xffffff,
+                    transparent: true,
+                    depthWrite: false,
+                    opacity: 0.95,
+                });
+                const g = new T.PlaneGeometry(w, w);
+                const m = new T.Mesh(g, mat);
+                // Billboards: per-frame lookAt(cam) keeps icons readable
+                // at any camera-angle setting.
+                m.position.set(x, ICON_Y, ICON_Z);
+                m.renderOrder = 2;
+
+                // mat.map is assigned ONLY from inside the load callbacks so
+                // a synchronous onError (theoretical for image loaders, but
+                // robust either way) can't be overwritten by a post-load
+                // unconditional assignment to the broken texture.
+                const url = _drumIconDataURL(piece);
+                const attach = (t) => {
+                    tuneTexture(t);
+                    const prev = mat.map;
+                    mat.map = t;
+                    t.needsUpdate = true;
+                    mat.needsUpdate = true;
+                    if (prev && prev !== t) prev.dispose();
+                };
+                loader.load(
+                    url,
+                    attach,
+                    undefined,
+                    () => {
+                        // Custom upload turned out to be unloadable (corrupt
+                        // payload, unsupported codec, decode failed). Swap in
+                        // the bundled SVG so the lane never sticks with an
+                        // empty texture — AND drop the broken override from
+                        // localStorage so the next rebuild doesn't retry the
+                        // same corrupt payload (and the settings UI stops
+                        // claiming a custom icon is set).
+                        const fallback = _drumIconBundledURL(piece);
+                        if (url === fallback) return;
+                        try { localStorage.removeItem('drum_h3d_icon_' + piece); } catch (_) { /* ignore */ }
+                        loader.load(fallback, attach);
+                    }
+                );
+                return m;
+            };
+            // Hand lanes.
+            for (let i = 0; i < LANE_COUNT; i++) {
+                const piece = LANES[i] && LANES[i].piece;
+                if (!piece) continue;
+                iconGroup.add(make(piece, LANE_X0 + i * LANE_GAP, ICON_W));
+            }
+            // Kick (if any) — parked one lane-width to the LEFT of the
+            // leftmost hand lane so it labels the kick bar without
+            // sprawling across the hand lanes.
+            if (LANES.length > LANE_COUNT) {
+                const kp = LANES[LANE_COUNT].piece;
+                const kickX = LANE_X0 - LANE_GAP;
+                iconGroup.add(make(kp, kickX, ICON_W));
+            }
+            scene.add(iconGroup);
+        }
+
+        function updateIconBillboards() {
+            if (!iconGroup || !cam) return;
+            for (const m of iconGroup.children) m.lookAt(cam.position);
+        }
+
         function buildLanes(_floorW, floorD) {
             laneGroup = new T.Group();
             // Alternating lane stripes for the 7 hand lanes (same teal/blue
@@ -1578,6 +1794,26 @@
                 stripe.rotation.x = -Math.PI / 2;
                 stripe.position.set(x, -0.25 * K, -floorD / 2 + BEHIND * TS);
                 laneGroup.add(stripe);
+            }
+            // Kick "stripe" — invisible at rest, lights up green/red when a
+            // kick is struck. Sits at laneGroup.children[LANE_COUNT] so it
+            // matches PIECE_TO_LANE['kick'] and rides the same lane-flash
+            // codepath as the hand stripes. Geometry + z-placement mirror
+            // the hand stripes so the flash reads as a true lane-wide pulse
+            // (the kick "lane" being the full width across all hand lanes).
+            if (LANES.length > LANE_COUNT) {
+                const g = new T.PlaneGeometry(KICK_W, floorD);
+                const m = new T.MeshBasicMaterial({
+                    color: 0x000000,
+                    transparent: true,
+                    opacity: 0,
+                });
+                const kStripe = new T.Mesh(g, m);
+                kStripe.rotation.x = -Math.PI / 2;
+                // y a hair above the hand stripes so the kick flash colour
+                // wins where they overlap.
+                kStripe.position.set(0, -0.24 * K, -floorD / 2 + BEHIND * TS);
+                laneGroup.add(kStripe);
             }
             scene.add(laneGroup);
         }
@@ -2060,15 +2296,11 @@
                     if (c.material) c.material.dispose();
                 }
             }
-            // Dispose laneGroup stripe meshes (PlaneGeometry + MeshBasicMaterial per
-            // lane) so kit-change rebuilds don't leak GPU resources.
-            if (laneGroup) {
-                while (laneGroup.children.length) {
-                    const c = laneGroup.children.pop();
-                    if (c.geometry) c.geometry.dispose();
-                    if (c.material) c.material.dispose();
-                }
-            }
+            // laneGroup + iconGroup go through dedicated helpers so the
+            // dispose path stays in one place (avoids drift between
+            // _disposeScene / teardown).
+            _disposeLaneGroup();
+            _disposeIconGroup();
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
             disposeMaterialArray(mDrumHitByLane);
@@ -2091,7 +2323,7 @@
             if (gBellDot) gBellDot.dispose();
             if (gFlamGrace) gFlamGrace.dispose();
             if (ren) ren.dispose();
-            scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = null;
+            scene = cam = ren = lights = kitMapGroup = notesGroup = null;
             mDrumByLane = mCymbalByLane = mKick = mKickHit = mKickMiss = null;
             mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
@@ -2123,6 +2355,10 @@
                 window.removeEventListener('drum_h3d:kit', _kitHandler);
                 _kitHandler = null;
             }
+            if (_iconsHandler) {
+                window.removeEventListener('drum_h3d:icons', _iconsHandler);
+                _iconsHandler = null;
+            }
             if (notesGroup) {
                 while (notesGroup.children.length) {
                     disposeMeshTree(notesGroup.children.pop());
@@ -2135,6 +2371,8 @@
                     if (c.material) c.material.dispose();
                 }
             }
+            _disposeLaneGroup();
+            _disposeIconGroup();
             disposeMaterialArray(mDrumByLane);
             disposeMaterialArray(mCymbalByLane);
             disposeMaterialArray(mDrumHitByLane);
@@ -2157,7 +2395,7 @@
             if (gBellDot) gBellDot.dispose();
             if (gFlamGrace) gFlamGrace.dispose();
             if (ren) ren.dispose();
-            scene = cam = ren = lights = laneGroup = kitMapGroup = notesGroup = null;
+            scene = cam = ren = lights = kitMapGroup = notesGroup = null;
             mDrumByLane = mCymbalByLane = mKick = mKickHit = mKickMiss = null;
             mDrumHitByLane = mDrumMissByLane = mCymbalHitByLane = mCymbalMissByLane = null;
             mAccentRing = mGhostRing = mSnareStripe = mBellDot = null;
@@ -2223,6 +2461,15 @@
                     };
                     window.addEventListener('drum_h3d:kit', _kitHandler);
 
+                    // User-uploaded drum icons: cheap path that rebuilds
+                    // only the icon planes (no scene reset, no MIDI reset).
+                    _iconsHandler = () => {
+                        if (!_isReady || !scene) return;
+                        _disposeIconGroup();
+                        buildIcons();
+                    };
+                    window.addEventListener('drum_h3d:icons', _iconsHandler);
+
                     // MIDI lifecycle. _midiInit is idempotent across init
                     // calls (re-running setRenderer for the same plugin
                     // doesn't re-request browser permission); _midiResume
@@ -2245,6 +2492,7 @@
                 if (!_isReady || !ren || !scene || !cam) return;
                 rebuildNotes(bundle);
                 _applyLaneFlashes();
+                updateIconBillboards();
                 _refreshHud();
                 ren.render(scene, cam);
             },
