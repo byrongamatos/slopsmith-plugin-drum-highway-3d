@@ -48,10 +48,22 @@
             Scroll speed <span id="drumh3d-scroll-speed-val" class="text-gray-500 font-mono">1.00x</span>
         </label>
         <input type="range" id="drumh3d-scroll-speed"
-            min="0.5" max="3" step="0.05" value="1"
+            min="0.5" max="5" step="0.05" value="1"
             oninput="window.drumH3dSetScrollSpeed && window.drumH3dSetScrollSpeed(this.value); document.getElementById('drumh3d-scroll-speed-val').textContent = parseFloat(this.value).toFixed(2) + 'x'"
             class="w-full">
-        <p class="text-xs text-gray-500 mt-1">Higher = notes traverse the highway faster (less density for fast songs).</p>
+        <p class="text-xs text-gray-500 mt-1">How fast notes traverse the highway.</p>
+    </div>
+
+    <!-- Beat spacing -->
+    <div class="mt-4">
+        <label for="drumh3d-note-spacing" class="text-xs font-medium text-gray-400 mb-1 block">
+            Beat spacing <span id="drumh3d-note-spacing-val" class="text-gray-500 font-mono">1.00x</span>
+        </label>
+        <input type="range" id="drumh3d-note-spacing"
+            min="0.5" max="5" step="0.05" value="1"
+            oninput="window.drumH3dSetNoteSpacing && window.drumH3dSetNoteSpacing(this.value); document.getElementById('drumh3d-note-spacing-val').textContent = parseFloat(this.value).toFixed(2) + 'x'"
+            class="w-full">
+        <p class="text-xs text-gray-500 mt-1">How spread out beats look. Composes with scroll speed — crank both for fast metal.</p>
     </div>
 
     <!-- MIDI input -->
@@ -430,13 +442,37 @@
         const camVal = document.getElementById('drumh3d-camera-val');
         const speed = document.getElementById('drumh3d-scroll-speed');
         const speedVal = document.getElementById('drumh3d-scroll-speed-val');
+        const spacing = document.getElementById('drumh3d-note-spacing');
+        const spacingVal = document.getElementById('drumh3d-note-spacing-val');
         // Source-of-truth bounds from screen.js so the UI clamp can't
         // drift from the renderer's clamp logic. Fallbacks match the
-        // SCROLL_SPEED_MIN/MAX constants there for the case where the
-        // API isn't loaded yet (e.g. settings opened before viz boots).
+        // SCROLL_SPEED_MIN/MAX (and NOTE_SPACING_*) constants there
+        // for the case where the API isn't loaded yet (e.g. settings
+        // opened before the viz boots).
         const speedBounds = (window.drumH3dScrollSpeedBounds
             && window.drumH3dScrollSpeedBounds())
-            || { min: 0.5, max: 3.0, default: 1.0 };
+            || { min: 0.5, max: 5.0, default: 1.0 };
+        const spacingBounds = (window.drumH3dNoteSpacingBounds
+            && window.drumH3dNoteSpacingBounds())
+            || { min: 0.5, max: 5.0, default: 1.0 };
+
+        // Small DRY helper: hydrate one bounded slider — sync its
+        // min/max from the bounds API, then set value+label from
+        // storage (clamped) or the renderer's default.
+        const hydrateSlider = (input, valEl, bounds, lsKey) => {
+            if (!input || !valEl || !bounds) return;
+            input.min = String(bounds.min);
+            input.max = String(bounds.max);
+            const stored = parseFloat(localStorage.getItem(lsKey));
+            const init = Number.isFinite(stored)
+                ? Math.min(bounds.max, Math.max(bounds.min, stored))
+                : (Number.isFinite(bounds.default) ? bounds.default : NaN);
+            if (Number.isFinite(init)) {
+                input.value = String(init);
+                valEl.textContent = init.toFixed(2) + 'x';
+            }
+        };
+
         try {
             const storedPal = localStorage.getItem('drum_h3d_palette');
             if (storedPal && PALETTES[storedPal]) pSel.value = storedPal;
@@ -448,29 +484,8 @@
                 camVal.textContent = c.toFixed(2);
             }
 
-            // Sync the slider's min/max from the renderer's bounds API
-            // so a future SCROLL_SPEED_MIN/MAX retune in screen.js
-            // can't leave the UI slider range out of date relative to
-            // the runtime clamp. The HTML attrs (min/max/value) act as
-            // fallbacks while JS hasn't run yet.
-            if (speed) {
-                speed.min = String(speedBounds.min);
-                speed.max = String(speedBounds.max);
-            }
-            // Initialise from storage if present, otherwise from the
-            // renderer's bounds.default — so a future SCROLL_SPEED_
-            // DEFAULT retune in screen.js doesn't leave the slider
-            // pinned to whatever HTML value="..." baked in.
-            const storedSpeed = parseFloat(localStorage.getItem('drum_h3d_scroll_speed'));
-            const speedInit = Number.isFinite(storedSpeed)
-                ? Math.min(speedBounds.max, Math.max(speedBounds.min, storedSpeed))
-                : (Number.isFinite(speedBounds.default)
-                    ? speedBounds.default
-                    : NaN);
-            if (Number.isFinite(speedInit) && speed && speedVal) {
-                speed.value = String(speedInit);
-                speedVal.textContent = speedInit.toFixed(2) + 'x';
-            }
+            hydrateSlider(speed, speedVal, speedBounds, 'drum_h3d_scroll_speed');
+            hydrateSlider(spacing, spacingVal, spacingBounds, 'drum_h3d_note_spacing');
         } catch (e) {
             console.warn('[Drum-Hwy3D settings] hydration failed:', e);
         }
