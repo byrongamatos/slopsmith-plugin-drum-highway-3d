@@ -96,8 +96,10 @@
         'snare', 'snare_xstick',
         'hh_closed', 'hh_open', 'hh_pedal',
         'tom_hi', 'tom_mid', 'tom_low', 'tom_floor',
+        'stack',
         'crash_l', 'crash_r', 'splash', 'china',
         'ride', 'ride_bell',
+        'bell',
     ];
     const PIECE_LABELS = {
         kick:         'KICK',
@@ -110,28 +112,34 @@
         tom_mid:      'TM2',
         tom_low:      'TM3',
         tom_floor:    'FT',
+        stack:        'STK',
         crash_l:      'CRl',
         crash_r:      'CRr',
         splash:       'SPL',
         china:        'CHN',
         ride:         'RD',
         ride_bell:    'BLL',
+        bell:         'BL',
     };
     const PIECE_CATEGORY = {
         kick: 'kick',
         snare: 'drum', snare_xstick: 'drum',
         hh_closed: 'cymbal', hh_open: 'cymbal', hh_pedal: 'cymbal',
         tom_hi: 'drum', tom_mid: 'drum', tom_low: 'drum', tom_floor: 'drum',
+        stack: 'cymbal',
         crash_l: 'cymbal', crash_r: 'cymbal', splash: 'cymbal', china: 'cymbal',
         ride: 'cymbal', ride_bell: 'cymbal',
+        bell: 'cymbal',
     };
     const PIECE_SUBKIND = {
         kick: 'kick',
         snare: 'snare', snare_xstick: 'snare',
         hh_closed: 'hihat', hh_open: 'hihat', hh_pedal: 'hihat',
         tom_hi: 'tom', tom_mid: 'tom', tom_low: 'tom', tom_floor: 'tom',
+        stack: 'crash',
         crash_l: 'crash', crash_r: 'crash', splash: 'crash', china: 'crash',
         ride: 'ride', ride_bell: 'ride',
+        bell: 'ride',
     };
     // Palette index per piece — chosen so the default 7-lane kit reads
     // the same colours as the original hardcoded LANES layout.
@@ -140,15 +148,31 @@
         snare: 0, snare_xstick: 0,
         hh_closed: 7, hh_open: 7, hh_pedal: 7,
         tom_hi: 4, tom_mid: 2, tom_low: 5, tom_floor: 5,
+        stack: 1,
         crash_l: 1, crash_r: 1, splash: 1, china: 1,
         ride: 3, ride_bell: 3,
+        bell: 3,
+    };
+
+    // Bumped each time the default fallbacks gain a new entry so we can
+    // distinguish "saved kit is missing fallback X because it predates X"
+    // (top up on load) from "user explicitly dropped fallback X" (leave
+    // alone). v2 added `stack` and `bell`.
+    const KIT_SCHEMA_VERSION = 2;
+    // Per-version list of fallback keys introduced at that version. The
+    // migration tops up ONLY these on first load after an upgrade, so a
+    // pre-existing fallback the user explicitly dropped at v1 (e.g.
+    // crash_r → ride) doesn't get silently restored just because their
+    // saved kit predates v2.
+    const _FALLBACKS_ADDED_AT_VERSION = {
+        2: ['stack', 'bell'],
     };
 
     // Default kit — replicates the prior hardcoded 7-piece + kick layout.
     // Users without a saved kit see exactly what the mockup originally
     // showed.
     const DEFAULT_KIT = {
-        version: 1,
+        version: KIT_SCHEMA_VERSION,
         name: 'Default 7-piece',
         // Lanes in order (left-to-right on the highway). The kick is a
         // special full-width bar at the bottom — its position in this
@@ -171,8 +195,10 @@
             snare_xstick: 'snare',
             hh_open: 'hh_closed', hh_pedal: 'hh_closed',
             tom_low: 'tom_mid',
+            stack: 'crash_l',
             crash_r: 'crash_l', splash: 'crash_l', china: 'crash_l',
             ride_bell: 'ride',
+            bell: 'ride',
         },
     };
 
@@ -211,8 +237,25 @@
             if (!seenPieces.has(to)) continue;
             cleanFb[from] = to;
         }
+        // Version-gated migration: older saved kits don't have fallback
+        // entries for pieces ADDED after the kit was saved. Top up only
+        // those newly-introduced keys per version bump — not the whole
+        // DEFAULT_KIT.fallbacks dict — so a fallback the user explicitly
+        // dropped at an older version isn't silently restored.
+        const savedVersion = Number(raw.version) || 0;
+        if (savedVersion < KIT_SCHEMA_VERSION) {
+            for (let v = savedVersion + 1; v <= KIT_SCHEMA_VERSION; v++) {
+                const newKeys = _FALLBACKS_ADDED_AT_VERSION[v] || [];
+                for (const from of newKeys) {
+                    if (from in cleanFb) continue;
+                    const to = DEFAULT_KIT.fallbacks[from];
+                    if (!to || !seenPieces.has(to)) continue;
+                    cleanFb[from] = to;
+                }
+            }
+        }
         return {
-            version: 1,
+            version: KIT_SCHEMA_VERSION,
             name: typeof raw.name === 'string' ? raw.name.slice(0, 80) : 'Custom kit',
             lanes: cleanLanes,
             fallbacks: cleanFb,
@@ -223,7 +266,20 @@
         try {
             const raw = localStorage.getItem(LS_KIT_CONFIG);
             if (!raw) return null;
-            return _validateKit(JSON.parse(raw));
+            const parsed = JSON.parse(raw);
+            const kit = _validateKit(parsed);
+            // If the validator migrated the saved kit (older version,
+            // added fallback keys), write it back so the migration runs
+            // once and not on every page load. Normalise the parsed
+            // version through `|| 0` so a missing / NaN version (e.g.
+            // pre-v1 saved kits with no version field) is treated as
+            // "very old" and triggers the write-back, not skipped due
+            // to NaN < KIT_SCHEMA_VERSION being false.
+            const savedVersion = Number(parsed && parsed.version) || 0;
+            if (kit && savedVersion < KIT_SCHEMA_VERSION) {
+                _writeKitConfig(kit);
+            }
+            return kit;
         } catch (_) { return null; }
     }
 
@@ -297,14 +353,18 @@
     }
     _rebuildPieceToLaneMap(_activeKit);
 
-    // Resolve a drum_tab hit's visual variant. Order matters: ghost wins over
-    // accent (ghost notes are intentionally quiet so their flag dominates),
-    // flam adds the leading grace disc, ride_bell adds the bright dot. A
-    // loud non-ghost hit (v >= 100) is an accent.
+    // Resolve a drum_tab hit's visual variant. Order matters and is
+    // intentional: ghost > flam > bell (piece-derived) > accent. A bell
+    // piece returns the 'bell' variant even at high velocity — but the
+    // actual bell-dot glyph is only drawn by the ride-shaped renderer
+    // (see buildNoteMesh: `laneCfg.subKind === 'ride'`). If the user
+    // routes `bell`/`ride_bell` to a non-ride lane via fallbacks, the
+    // hit still scores correctly but renders as that lane's default
+    // shape. (Ghost is intentionally quiet so its flag dominates.)
     function _variantForHit(hit) {
         if (hit.g) return 'ghost';
         if (hit.f) return 'flam';
-        if (hit.p === 'ride_bell') return 'bell';
+        if (hit.p === 'ride_bell' || hit.p === 'bell') return 'bell';
         const v = typeof hit.v === 'number' ? hit.v : 100;
         if (v >= 100) return 'accent';
         return 'normal';
@@ -319,6 +379,7 @@
     // baseline and the settings UI can override later. Multiple MIDI notes
     // can map to the same piece-id (e.g. 35 & 36 both → kick).
     const MIDI_TO_PIECE = {
+        30: 'stack',
         35: 'kick',         36: 'kick',
         37: 'snare_xstick',
         38: 'snare',        40: 'snare',
@@ -335,6 +396,7 @@
         53: 'ride_bell',
         55: 'splash',
         57: 'crash_r',
+        80: 'bell',
     };
 
     // ±50 ms hit window — same as the 2D drums plugin so users get
@@ -661,6 +723,18 @@
     // 2D plugin's DRUM_MIDI_NOTES; adding entries here would just download
     // 404s if the soundfont doesn't ship them.
     const DRUM_MIDI_NOTES = [35, 36, 38, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 57, 59];
+    // Per-MIDI playback fallback when the JCLive soundfont has no native
+    // preset for the note. Stack (30 = "Reverse Cymbal") and bell (80 =
+    // "Mute Triangle") aren't in the soundfont's drum kit; route them to
+    // a close cymbal sample so the pad isn't silent.
+    // Fallback MIDI must itself be in DRUM_MIDI_NOTES. The soundfont
+    // doesn't ship 53 either, so both the new `bell` piece and the
+    // pre-existing 53/ride_bell input route to 51 (Ride).
+    const _AUDIO_FALLBACK_MIDI = {
+        30: 49,  // stack pad     → 49 (closest loaded crash)
+        53: 51,  // ride_bell pad → 51 (closest loaded ride; 53 not loaded)
+        80: 51,  // bell pad      → 51 (same)
+    };
     const LS_SYNTH_VOL = 'drum_h3d_synth_vol';
 
     let _audioCtx = null;
@@ -775,7 +849,17 @@
 
     function _synthDrumHit(midiNote, velocity) {
         if (!_synthPlayer || !_audioCtx || !_synthGain) return;
-        const preset = _drumPresets[midiNote];
+        // Direct preset preferred; fall back to a closely-related MIDI
+        // for notes the soundfont doesn't ship (stack 30, bell 80).
+        let preset = _drumPresets[midiNote];
+        let playNote = midiNote;
+        if (!preset) {
+            const fb = _AUDIO_FALLBACK_MIDI[midiNote];
+            if (fb !== undefined && _drumPresets[fb]) {
+                preset = _drumPresets[fb];
+                playNote = fb;
+            }
+        }
         if (!preset) return;
         _synthEnsureCtx();
         // Velocity-to-volume: normalise to 0-1. The overall slider level is
@@ -783,7 +867,7 @@
         // don't multiply here — that would square the volume.
         const vol = (velocity || 100) / 127;
         // 0.5 s queue duration — drum samples are short, no sustain needed.
-        _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, 0, midiNote, 0.5, vol);
+        _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, 0, playNote, 0.5, vol);
     }
 
     function _synthSetVolume(v) {
