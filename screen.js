@@ -1053,8 +1053,14 @@
         window.dispatchEvent(new CustomEvent('drum_h3d:settings', { detail: { cameraAngle: c } }));
     };
     window.drumH3dSetScrollSpeed = function (v) {
-        const s = Math.min(SCROLL_SPEED_MAX,
-                           Math.max(SCROLL_SPEED_MIN, Number(v) || SCROLL_SPEED_DEFAULT));
+        // Parse-then-finite-check, NOT `Number(v) || default` — the
+        // latter falls through to default on a legitimate zero (which
+        // we then clamp to MIN). Distinguishing "bad input" from "low
+        // value" avoids silently snapping to 1.0 on edge cases.
+        const n = Number(v);
+        const s = Number.isFinite(n)
+            ? Math.min(SCROLL_SPEED_MAX, Math.max(SCROLL_SPEED_MIN, n))
+            : SCROLL_SPEED_DEFAULT;
         try { localStorage.setItem(LS_KEYS.scrollSpeed, String(s)); } catch (_) {}
         window.dispatchEvent(new CustomEvent('drum_h3d:settings', { detail: { scrollSpeed: s } }));
     };
@@ -1605,9 +1611,11 @@
                 // negative renderOrder forces the kick to draw first;
                 // hand notes then pass the depth test at the same Z
                 // and overwrite — so kicks visually sit BENEATH the
-                // hand hits instead of on top.
-                group.renderOrder = -1;
+                // hand hits instead of on top. NB: Three.js sorts on
+                // each Mesh's renderOrder, not the parent Group's, so
+                // set it on every child mesh of this group.
                 const bar = new T.Mesh(gKickBar, mKick);
+                bar.renderOrder = -1;
                 if (variant === 'accent') bar.scale.setScalar(ACCENT_SCALE);
                 group.add(bar);
                 if (variant === 'accent') {
@@ -1620,6 +1628,7 @@
                     edgeGeo.userData.transient = true;
                     edgeMat.userData.transient = true;
                     const edge = new T.Mesh(edgeGeo, edgeMat);
+                    edge.renderOrder = -1;
                     edge.position.set(0, 0, KICK_D * 0.5);
                     group.add(edge);
                 }
