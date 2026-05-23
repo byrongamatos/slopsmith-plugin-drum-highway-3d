@@ -1697,32 +1697,17 @@
             const ICON_Y = -0.25 * K + ICON_HALF;
             const ICON_Z = 7 * K;                       // toward camera from hit bar
             const loader = new T.TextureLoader();
+            const tuneTexture = (t) => {
+                if ('colorSpace' in t && T.SRGBColorSpace) t.colorSpace = T.SRGBColorSpace;
+                t.anisotropy = 4;
+            };
             const make = (piece, x, w) => {
-                const url = _drumIconDataURL(piece);
-                const tex = loader.load(
-                    url,
-                    () => { tex.needsUpdate = true; },
-                    undefined,
-                    () => {
-                        // Custom upload turned out to be unloadable (corrupt
-                        // payload, unsupported codec, decode failed). Swap in
-                        // the bundled SVG so the lane never sticks with an
-                        // empty texture.
-                        const fallback = _drumIconBundledURL(piece);
-                        if (url === fallback) return;
-                        const fb = loader.load(fallback, () => { fb.needsUpdate = true; });
-                        if ('colorSpace' in fb && T.SRGBColorSpace) fb.colorSpace = T.SRGBColorSpace;
-                        fb.anisotropy = 4;
-                        const prev = mat.map;
-                        mat.map = fb;
-                        mat.needsUpdate = true;
-                        if (prev) prev.dispose();
-                    }
-                );
-                if ('colorSpace' in tex && T.SRGBColorSpace) tex.colorSpace = T.SRGBColorSpace;
-                tex.anisotropy = 4;
+                // Build the material + mesh up-front so the load/error
+                // callbacks (which may fire synchronously for data URIs
+                // depending on the browser's image cache) don't hit a TDZ
+                // on `mat`. Callbacks receive the texture as an argument
+                // and never close over `tex` / `fb` from the outer scope.
                 const mat = new T.MeshBasicMaterial({
-                    map: tex,
                     color: 0xffffff,
                     transparent: true,
                     depthWrite: false,
@@ -1734,6 +1719,34 @@
                 // at any camera-angle setting.
                 m.position.set(x, ICON_Y, ICON_Z);
                 m.renderOrder = 2;
+
+                // mat.map is assigned ONLY from inside the load callbacks so
+                // a synchronous onError (theoretical for image loaders, but
+                // robust either way) can't be overwritten by a post-load
+                // unconditional assignment to the broken texture.
+                const url = _drumIconDataURL(piece);
+                const attach = (t) => {
+                    tuneTexture(t);
+                    const prev = mat.map;
+                    mat.map = t;
+                    t.needsUpdate = true;
+                    mat.needsUpdate = true;
+                    if (prev && prev !== t) prev.dispose();
+                };
+                loader.load(
+                    url,
+                    attach,
+                    undefined,
+                    () => {
+                        // Custom upload turned out to be unloadable (corrupt
+                        // payload, unsupported codec, decode failed). Swap in
+                        // the bundled SVG so the lane never sticks with an
+                        // empty texture.
+                        const fallback = _drumIconBundledURL(piece);
+                        if (url === fallback) return;
+                        loader.load(fallback, attach);
+                    }
+                );
                 return m;
             };
             // Hand lanes.
@@ -1779,11 +1792,11 @@
             // Kick "stripe" — invisible at rest, lights up green/red when a
             // kick is struck. Sits at laneGroup.children[LANE_COUNT] so it
             // matches PIECE_TO_LANE['kick'] and rides the same lane-flash
-            // codepath as the hand stripes. (The per-note kick bar already
-            // gives note-level feedback; this is the whole-lane equivalent
-            // so the kick has parity with hand lanes when MIDI is firing.)
+            // codepath as the hand stripes. Geometry + z-placement mirror
+            // the hand stripes so the flash reads as a true lane-wide pulse
+            // (the kick "lane" being the full width across all hand lanes).
             if (LANES.length > LANE_COUNT) {
-                const g = new T.PlaneGeometry(KICK_W, KICK_D * 4);
+                const g = new T.PlaneGeometry(KICK_W, floorD);
                 const m = new T.MeshBasicMaterial({
                     color: 0x000000,
                     transparent: true,
@@ -1791,7 +1804,9 @@
                 });
                 const kStripe = new T.Mesh(g, m);
                 kStripe.rotation.x = -Math.PI / 2;
-                kStripe.position.set(0, -0.24 * K, 0);
+                // y a hair above the hand stripes so the kick flash colour
+                // wins where they overlap.
+                kStripe.position.set(0, -0.24 * K, -floorD / 2 + BEHIND * TS);
                 laneGroup.add(kStripe);
             }
             scene.add(laneGroup);
