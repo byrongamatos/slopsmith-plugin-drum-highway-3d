@@ -435,7 +435,8 @@
         // SCROLL_SPEED_MIN/MAX constants there for the case where the
         // API isn't loaded yet (e.g. settings opened before viz boots).
         const speedBounds = (window.drumH3dScrollSpeedBounds
-            && window.drumH3dScrollSpeedBounds()) || { min: 0.5, max: 3.0 };
+            && window.drumH3dScrollSpeedBounds())
+            || { min: 0.5, max: 3.0, default: 1.0 };
         try {
             const storedPal = localStorage.getItem('drum_h3d_palette');
             if (storedPal && PALETTES[storedPal]) pSel.value = storedPal;
