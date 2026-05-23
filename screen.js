@@ -1630,17 +1630,20 @@
                     // are per-note — flag both as transient so disposeMeshTree
                     // releases them when the note recycles.
                     const edgeGeo = new T.BoxGeometry(KICK_W * 0.96, KICK_H * 1.05, 0.6 * K);
-                    // depthWrite:false so the edge — which sits CLOSER to
-                    // the camera than the kick body — doesn't poison the
-                    // depth buffer for hand hits at the same beat (they
-                    // share the kick body's Z, not the edge's). Without
-                    // this, renderOrder alone can't save us: the edge
-                    // would write its closer depth and a later hand hit
-                    // at the body's Z would fail the depth test.
+                    // depthWrite:false so the edge doesn't poison the
+                    // depth buffer for hand hits at the same beat
+                    // (the edge sits closer to the camera than the
+                    // kick body / hand mesh). And opacity dropped to
+                    // 0.4 so even though the edge renders in the
+                    // transparent pass AFTER opaque hand hits (Three.js
+                    // always orders transparent last, regardless of
+                    // renderOrder), the hand glyph still reads clearly
+                    // through the leading-edge wash. The accent kept
+                    // its bright-flash intent, just dimmer.
                     const edgeMat = new T.MeshBasicMaterial({
                         color: 0xffffff,
                         transparent: true,
-                        opacity: 0.9,
+                        opacity: 0.4,
                         depthWrite: false,
                     });
                     edgeGeo.userData.transient = true;
