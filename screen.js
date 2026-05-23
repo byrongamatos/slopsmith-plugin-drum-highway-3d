@@ -270,9 +270,13 @@
             const kit = _validateKit(parsed);
             // If the validator migrated the saved kit (older version,
             // added fallback keys), write it back so the migration runs
-            // once and not on every page load. Compare versions on the
-            // raw object — kit is always stamped to current.
-            if (kit && Number(parsed?.version) < KIT_SCHEMA_VERSION) {
+            // once and not on every page load. Normalise the parsed
+            // version through `|| 0` so a missing / NaN version (e.g.
+            // pre-v1 saved kits with no version field) is treated as
+            // "very old" and triggers the write-back, not skipped due
+            // to NaN < KIT_SCHEMA_VERSION being false.
+            const savedVersion = Number(parsed && parsed.version) || 0;
+            if (kit && savedVersion < KIT_SCHEMA_VERSION) {
                 _writeKitConfig(kit);
             }
             return kit;
