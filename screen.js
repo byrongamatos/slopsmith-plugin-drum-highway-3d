@@ -1914,11 +1914,16 @@
             const laneCfg = LANES[note.lane];
             if (!laneCfg) return;
 
+            // Compute once per note — multiplier doesn't change between
+            // the Z calc, the proximity/approach cues, and the flam-
+            // grace block below. Repeated calls cost three function +
+            // settings.* lookups per note per frame for nothing.
+            const _speedMul = _effectiveSpeedMul(settings);
             // Note Z scales by speedMul so a higher user scroll-speed
             // setting moves notes the same screen distance in less
             // song-time (paired with the smaller dt-window in the
             // caller). speedMul = 1 reproduces the original behaviour.
-            const z = -dt * TS * (_effectiveSpeedMul(settings));
+            const z = -dt * TS * _speedMul;
             const x = laneCfg.kind === 'kick' ? 0 : (LANE_X0 + note.lane * LANE_GAP);
             const y = laneCfg.kind === 'kick' ? 0 : DISC_H * 0.5;
 
@@ -1932,7 +1937,6 @@
             // they need to shrink proportionally, otherwise the cue
             // would fire while the note is still visually far from
             // the hit line.
-            const _speedMul = _effectiveSpeedMul(settings);
             const proximity = Math.max(0, 1 - Math.abs(dt) * _speedMul / 0.6);
             if (laneCfg.kind === 'drum' && note.variant !== 'ghost' && mDrumByLane[note.lane]) {
                 // Subtle pulse via emissiveIntensity — palette-driven base + pulse.
@@ -1996,12 +2000,12 @@
                 // applies — otherwise at high speed the grace marker
                 // spawns past the visible window, and at low speed
                 // far-ahead grace notes are culled when their main
-                // note is still visible.
-                const _gMul = _effectiveSpeedMul(settings);
-                if (graceDt >= -BEHIND / _gMul && graceDt <= AHEAD / _gMul) {
+                // note is still visible. Reuse the same _speedMul
+                // already computed at the top of placeNote().
+                if (graceDt >= -BEHIND / _speedMul && graceDt <= AHEAD / _speedMul) {
                     const grace = new T.Mesh(gFlamGrace, mDrumByLane[note.lane]);
                     grace.position.set(x - DISC_R_BASE * 0.9, y,
-                                       -graceDt * TS * _gMul);
+                                       -graceDt * TS * _speedMul);
                     notesGroup.add(grace);
                 }
             }
