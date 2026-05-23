@@ -1847,8 +1847,14 @@
             mesh.position.set(x, y, z);
 
             // Brighten emissive as the note approaches the hit line.
-            // 0 at AHEAD, peak at 0, then linger briefly past it.
-            const proximity = Math.max(0, 1 - Math.abs(dt) / 0.6);
+            // 0 at AHEAD, peak at 0, then linger briefly past it. The
+            // dt thresholds (0.6s / 0.3s) are tuned to on-screen
+            // distance, not raw song-time — so when scroll-speed > 1
+            // they need to shrink proportionally, otherwise the cue
+            // would fire while the note is still visually far from
+            // the hit line.
+            const _speedMul = settings.scrollSpeed || 1;
+            const proximity = Math.max(0, 1 - Math.abs(dt) * _speedMul / 0.6);
             if (laneCfg.kind === 'drum' && note.variant !== 'ghost' && mDrumByLane[note.lane]) {
                 // Subtle pulse via emissiveIntensity — palette-driven base + pulse.
                 mDrumByLane[note.lane].emissiveIntensity = 0.45 + proximity * 0.35;
@@ -1860,7 +1866,9 @@
 
             // Slight scale-up as notes near the hit line gives the eye a
             // "this is the moment" cue. Capped so it doesn't overshoot.
-            const approach = 1.0 + Math.max(0, 1 - Math.abs(dt) / 0.3) * 0.12;
+            // Same speedMul scaling as `proximity` so the cue fires at
+            // the right on-screen position regardless of scroll speed.
+            const approach = 1.0 + Math.max(0, 1 - Math.abs(dt) * _speedMul / 0.3) * 0.12;
             mesh.scale.multiplyScalar(approach);
 
             // Status overrides — clone the shared lane material per-note so
