@@ -1773,8 +1773,17 @@
         }
 
         function updateIconBillboards() {
+            // Screen-aligned billboard: every icon inherits the camera's
+            // orientation, so the icon plane is always parallel to the
+            // camera's near plane. lookAt(cam) and the pitch+yaw approach
+            // both leak a roll for off-centre lanes (the plane's local Y
+            // gets tilted relative to screen-up), which user-uploaded photos
+            // make obvious. Copying cam.quaternion is the only no-roll
+            // approach that's truly invariant to lane X position.
             if (!iconGroup || !cam) return;
-            for (const m of iconGroup.children) m.lookAt(cam.position);
+            for (const m of iconGroup.children) {
+                m.quaternion.copy(cam.quaternion);
+            }
         }
 
         function buildLanes(_floorW, floorD) {
