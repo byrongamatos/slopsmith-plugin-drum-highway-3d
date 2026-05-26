@@ -845,10 +845,29 @@
                 _playerScriptLoaded = true;
             }
             if (typeof WebAudioFontPlayer === 'undefined') return;
-            _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            // latencyHint:'interactive' is the spec default in Chrome but
+            // explicit honouring on Safari / Firefox shaves a few ms of
+            // audio-graph buffer. Constructor is the only place it's read.
+            const AC = window.AudioContext || window.webkitAudioContext;
+            try {
+                _audioCtx = new AC({ latencyHint: 'interactive' });
+            } catch (_) {
+                _audioCtx = new AC();
+            }
             _synthGain = _audioCtx.createGain();
             _synthGain.gain.value = _synthVolume;
             _synthGain.connect(_audioCtx.destination);
+            // Cold-start warmup: schedule a one-sample silent buffer right
+            // away so the audio thread is spun up before the user's first
+            // real hit. Without this, the very first sample after resume()
+            // can lag ~10-30 ms behind steady-state hits.
+            try {
+                const silent = _audioCtx.createBuffer(1, 1, _audioCtx.sampleRate);
+                const src = _audioCtx.createBufferSource();
+                src.buffer = silent;
+                src.connect(_audioCtx.destination);
+                src.start(0);
+            } catch (_) { /* harmless if the buffer alloc fails */ }
             _synthPlayer = new WebAudioFontPlayer();
             // Chrome creates AudioContext in suspended state and refuses to
             // play scheduled audio until a user gesture resumes it. MIDI
@@ -915,8 +934,10 @@
         // already applied by _synthGain (its gain.value == _synthVolume), so
         // don't multiply here — that would square the volume.
         const vol = (velocity || 100) / 127;
+        // Pass currentTime explicitly so the player doesn't have to compute
+        // it from when=0; saves a function-call hop on the hot path.
         // 0.5 s queue duration — drum samples are short, no sustain needed.
-        _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, 0, playNote, 0.5, vol);
+        _synthPlayer.queueWaveTable(_audioCtx, _synthGain, preset, _audioCtx.currentTime, playNote, 0.5, vol);
     }
 
     function _synthSetVolume(v) {
