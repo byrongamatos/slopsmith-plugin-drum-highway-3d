@@ -363,8 +363,14 @@
         KICK_W = Math.max(1, LANE_COUNT) * LANE_GAP + 2 * K;
     }
     _rebuildLanesFromKit(_activeKit);
-    const KICK_H = 1.4 * K;                        // kick bar thickness
+    const KICK_H = 0.5 * K;                        // kick bar thickness (flat floor strip)
     const KICK_D = 4.0 * K;                        // kick bar depth (along scroll)
+    // Y of the kick slab's centre. Floor sits at y = -0.3K, so a 0.5K-tall
+    // slab centred at -0.05K rests flush on the floor with its top at
+    // +0.2K — below the drum/cymbal bodies (which rest centred at 0.6K) so
+    // a concurrent cymbal reads clearly ABOVE the kick instead of being
+    // swallowed by a tall full-width bar.
+    const KICK_Y = -0.05 * K;
 
     // Variant size multipliers.
     const GHOST_SCALE = 0.65;
@@ -2191,7 +2197,7 @@
             // caller). speedMul = 1 reproduces the original behaviour.
             const z = -dt * TS * _speedMul;
             const x = laneCfg.kind === 'kick' ? 0 : (LANE_X0 + note.lane * LANE_GAP);
-            const y = laneCfg.kind === 'kick' ? 0 : DISC_H * 0.5;
+            const y = laneCfg.kind === 'kick' ? KICK_Y : DISC_H * 0.5;
 
             const mesh = buildNoteMesh(note.lane, note.variant);
             mesh.position.set(x, y, z);
